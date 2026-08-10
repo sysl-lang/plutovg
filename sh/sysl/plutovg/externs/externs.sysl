@@ -1,0 +1,125 @@
+// PlutoVG's own surface, declared verbatim.
+//
+// **Nothing here is meant to be called by a program.** Every name and every convention is C's: a
+// canvas is a raw pointer, a colour is four floats behind a `const*`, a string is a pointer and a
+// length with an encoding beside it. The module beside this one turns those into sysl and is what an
+// application imports.
+//
+// The split keeps two jobs apart. This one has to be **faithful** — a signature that disagrees with
+// the C header links perfectly and corrupts the call at run time, and nothing in this arrangement
+// checks one against the other, so each declaration below was read out of `plutovg.h` rather than
+// remembered. The other one has to be **pleasant**, which is a different question and would otherwise
+// be answered in the same breath.
+//
+// **Every one of these takes scalars and pointers and nothing else.** That is the fact that made
+// PlutoVG worth binding: not one public function in the library takes or returns a struct by value,
+// so there is no shim here at all, and the `UsefulBufC` problem that reshaped qcbor's whole API
+// simply does not arise.
+
+module sh.sysl.plutovg.externs
+
+// ## Surfaces — `plutovg-surface.c`
+//
+// A surface is a block of premultiplied ARGB32 pixels. `create` allocates its own; `create_for_data`
+// borrows the caller's, which is the house pattern and what an embedded caller wants.
+
+extern "plutovg_surface_create" surface_create(width: int, height: int) -> *u8
+extern "plutovg_surface_create_for_data" surface_create_for_data(data: *u8, width: int, height: int, stride: int) -> *u8
+extern "plutovg_surface_destroy" surface_destroy(surface: *u8)
+extern "plutovg_surface_get_data" surface_get_data(surface: *u8) -> *u8
+extern "plutovg_surface_get_width" surface_get_width(surface: *u8) -> int
+extern "plutovg_surface_get_height" surface_get_height(surface: *u8) -> int
+extern "plutovg_surface_get_stride" surface_get_stride(surface: *u8) -> int
+extern "plutovg_surface_clear" surface_clear(surface: *u8, colour: *f32)
+extern "plutovg_surface_write_to_png" surface_write_to_png(surface: *u8, filename: *u8) -> bool
+
+// ## Canvases — `plutovg-canvas.c`
+
+extern "plutovg_canvas_create" canvas_create(surface: *u8) -> *u8
+extern "plutovg_canvas_destroy" canvas_destroy(canvas: *u8)
+extern "plutovg_canvas_save" canvas_save(canvas: *u8)
+extern "plutovg_canvas_restore" canvas_restore(canvas: *u8)
+
+// ### Paint
+
+extern "plutovg_canvas_set_rgb" canvas_set_rgb(canvas: *u8, r: f32, g: f32, b: f32)
+extern "plutovg_canvas_set_rgba" canvas_set_rgba(canvas: *u8, r: f32, g: f32, b: f32, a: f32)
+extern "plutovg_canvas_set_opacity" canvas_set_opacity(canvas: *u8, opacity: f32)
+extern "plutovg_canvas_set_operator" canvas_set_operator(canvas: *u8, op: int)
+extern "plutovg_canvas_set_fill_rule" canvas_set_fill_rule(canvas: *u8, winding: int)
+
+// A gradient's stops are an array of `plutovg_gradient_stop_t`, which is `{ float offset;
+// plutovg_color_t color; }` — five floats, so the array is passed as a `*f32` of `5 * nstops`.
+extern "plutovg_canvas_set_linear_gradient" canvas_set_linear_gradient(
+    canvas: *u8, x1: f32, y1: f32, x2: f32, y2: f32,
+    spread: int, stops: *f32, nstops: int, matrix: *f32)
+
+extern "plutovg_canvas_set_radial_gradient" canvas_set_radial_gradient(
+    canvas: *u8, cx: f32, cy: f32, cr: f32, fx: f32, fy: f32, fr: f32,
+    spread: int, stops: *f32, nstops: int, matrix: *f32)
+
+// ### Stroking
+
+extern "plutovg_canvas_set_line_width" canvas_set_line_width(canvas: *u8, width: f32)
+extern "plutovg_canvas_set_line_cap" canvas_set_line_cap(canvas: *u8, cap: int)
+extern "plutovg_canvas_set_line_join" canvas_set_line_join(canvas: *u8, join: int)
+extern "plutovg_canvas_set_dash_offset" canvas_set_dash_offset(canvas: *u8, offset: f32)
+extern "plutovg_canvas_set_dash_array" canvas_set_dash_array(canvas: *u8, dashes: *f32, ndashes: int)
+
+// ### The transform
+
+extern "plutovg_canvas_translate" canvas_translate(canvas: *u8, tx: f32, ty: f32)
+extern "plutovg_canvas_scale" canvas_scale(canvas: *u8, sx: f32, sy: f32)
+extern "plutovg_canvas_rotate" canvas_rotate(canvas: *u8, angle: f32)
+extern "plutovg_canvas_reset_matrix" canvas_reset_matrix(canvas: *u8)
+extern "plutovg_canvas_set_matrix" canvas_set_matrix(canvas: *u8, matrix: *f32)
+extern "plutovg_canvas_get_matrix" canvas_get_matrix(canvas: *u8, matrix: *f32)
+
+// ### Building a path
+
+extern "plutovg_canvas_new_path" canvas_new_path(canvas: *u8)
+extern "plutovg_canvas_close_path" canvas_close_path(canvas: *u8)
+extern "plutovg_canvas_move_to" canvas_move_to(canvas: *u8, x: f32, y: f32)
+extern "plutovg_canvas_line_to" canvas_line_to(canvas: *u8, x: f32, y: f32)
+extern "plutovg_canvas_quad_to" canvas_quad_to(canvas: *u8, x1: f32, y1: f32, x2: f32, y2: f32)
+extern "plutovg_canvas_cubic_to" canvas_cubic_to(canvas: *u8, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32)
+extern "plutovg_canvas_arc_to" canvas_arc_to(canvas: *u8, rx: f32, ry: f32, angle: f32, large_arc: bool, sweep: bool, x: f32, y: f32)
+extern "plutovg_canvas_rect" canvas_rect(canvas: *u8, x: f32, y: f32, w: f32, h: f32)
+extern "plutovg_canvas_round_rect" canvas_round_rect(canvas: *u8, x: f32, y: f32, w: f32, h: f32, rx: f32, ry: f32)
+extern "plutovg_canvas_ellipse" canvas_ellipse(canvas: *u8, cx: f32, cy: f32, rx: f32, ry: f32)
+extern "plutovg_canvas_circle" canvas_circle(canvas: *u8, cx: f32, cy: f32, r: f32)
+extern "plutovg_canvas_arc" canvas_arc(canvas: *u8, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, ccw: bool)
+
+// ### Painting it
+
+extern "plutovg_canvas_fill" canvas_fill(canvas: *u8)
+extern "plutovg_canvas_stroke" canvas_stroke(canvas: *u8)
+extern "plutovg_canvas_clip" canvas_clip(canvas: *u8)
+extern "plutovg_canvas_fill_preserve" canvas_fill_preserve(canvas: *u8)
+extern "plutovg_canvas_stroke_preserve" canvas_stroke_preserve(canvas: *u8)
+extern "plutovg_canvas_clip_preserve" canvas_clip_preserve(canvas: *u8)
+extern "plutovg_canvas_fill_contains" canvas_fill_contains(canvas: *u8, x: f32, y: f32) -> bool
+extern "plutovg_canvas_stroke_contains" canvas_stroke_contains(canvas: *u8, x: f32, y: f32) -> bool
+extern "plutovg_canvas_clip_contains" canvas_clip_contains(canvas: *u8, x: f32, y: f32) -> bool
+
+// The extents are written into a `plutovg_rect_t`, which is four floats.
+extern "plutovg_canvas_fill_extents" canvas_fill_extents(canvas: *u8, extents: *f32)
+extern "plutovg_canvas_stroke_extents" canvas_stroke_extents(canvas: *u8, extents: *f32)
+extern "plutovg_canvas_clip_extents" canvas_clip_extents(canvas: *u8, extents: *f32)
+
+// ## Fonts and text — `plutovg-font.c`
+//
+// PlutoVG carries its own TrueType rasterizer (a vendored `stb_truetype`), so text needs no second
+// binding. `length` of -1 means the text is NUL-terminated.
+
+extern "plutovg_font_face_load_from_file" font_face_load_from_file(filename: *u8, ttcindex: int) -> *u8
+extern "plutovg_font_face_load_from_data" font_face_load_from_data(data: *u8, length: uint, ttcindex: int, destroy: *u8, closure: *u8) -> *u8
+extern "plutovg_font_face_destroy" font_face_destroy(face: *u8)
+extern "plutovg_font_face_get_metrics" font_face_get_metrics(face: *u8, size: f32, ascent: *f32, descent: *f32, line_gap: *f32, extents: *f32)
+
+extern "plutovg_canvas_set_font" canvas_set_font(canvas: *u8, face: *u8, size: f32)
+extern "plutovg_canvas_set_font_size" canvas_set_font_size(canvas: *u8, size: f32)
+extern "plutovg_canvas_fill_text" canvas_fill_text(canvas: *u8, text: *u8, length: int, encoding: int, x: f32, y: f32) -> f32
+extern "plutovg_canvas_stroke_text" canvas_stroke_text(canvas: *u8, text: *u8, length: int, encoding: int, x: f32, y: f32) -> f32
+extern "plutovg_canvas_add_text" canvas_add_text(canvas: *u8, text: *u8, length: int, encoding: int, x: f32, y: f32) -> f32
+extern "plutovg_canvas_text_extents" canvas_text_extents(canvas: *u8, text: *u8, length: int, encoding: int, extents: *f32) -> f32

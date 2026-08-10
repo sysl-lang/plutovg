@@ -1,0 +1,438 @@
+// What the binding claims, asserted against the real library.
+//
+// **These are pixel tests.** A binding can be wrong in a way that compiles, links and returns without
+// complaint — a parameter in the wrong order, a float read as a double, an enum off by one — and the
+// only thing that catches it is looking at what was drawn. So most of what follows rasterizes
+// something small and reads the bytes back.
+//
+// A surface is premultiplied ARGB32, which on a little-endian machine is the bytes B, G, R, A. The
+// helpers below read a pixel out of that.
+
+module sh.sysl.plutovg
+@tests
+
+// The four components of the pixel at (x, y).
+private blue_at(s: *Surface, x: int, y: int) -> u8 = s.data()[usize(y * s.stride() + x * 4)]
+private green_at(s: *Surface, x: int, y: int) -> u8 = s.data()[usize(y * s.stride() + x * 4) + 1]
+private red_at(s: *Surface, x: int, y: int) -> u8 = s.data()[usize(y * s.stride() + x * 4) + 2]
+private alpha_at(s: *Surface, x: int, y: int) -> u8 = s.data()[usize(y * s.stride() + x * 4) + 3]
+
+// -- surfaces ------------------------------------------------------------------------------------
+
+@test("a surface has the size it was asked for")
+surface_has_its_size()
+    var s = surface(64, 32)
+
+    assert(s.ok())
+    assert_eq(s.width(), 64)
+    assert_eq(s.height(), 32)
+    s.close()
+end surface_has_its_size
+
+@test("a surface starts fully transparent")
+surface_starts_transparent()
+    var s = surface(8, 8)
+
+    assert_eq(alpha_at(&s, 0, 0), 0)
+    assert_eq(alpha_at(&s, 7, 7), 0)
+    s.close()
+end surface_starts_transparent
+
+@test("clearing paints every pixel")
+clear_paints_everything()
+    var s = surface(8, 8)
+
+    s.clear(1.0, 0.0, 0.0, 1.0)
+
+    assert_eq(red_at(&s, 0, 0), 255)
+    assert_eq(green_at(&s, 0, 0), 0)
+    assert_eq(alpha_at(&s, 0, 0), 255)
+    assert_eq(red_at(&s, 7, 7), 255)
+    s.close()
+end clear_paints_everything
+
+@test("a surface over the caller's own storage writes into it")
+for_data_uses_the_callers_buffer()
+    // This is the shape a machine with no room for a full frame uses: the caller owns the pixels and
+    // the library never allocates them.
+    var pixels: [64]u8
+
+    var s = for_data(pixels[..], 4, 4, 16)
+
+    assert(s.ok())
+    assert_eq(s.width(), 4)
+    s.clear(0.0, 0.0, 1.0, 1.0)
+
+    // Blue is the first byte of a little-endian ARGB32 pixel, and it went into the caller's array.
+    assert_eq(pixels[0], 255)
+    assert_eq(pixels[3], 255)
+    s.close()
+end for_data_uses_the_callers_buffer
+
+@test("closing twice is harmless")
+close_is_idempotent()
+    var s = surface(4, 4)
+
+    s.close()
+    s.close()
+    assert(!s.ok())
+end close_is_idempotent
+
+// -- filling -------------------------------------------------------------------------------------
+
+@test("a filled rectangle covers what is inside it and nothing outside")
+fill_rect_covers_its_own_area()
+    var s = surface(32, 32)
+    var c = canvas(&s)
+
+    c.rgb(0.0, 1.0, 0.0)
+    c.rect(8.0, 8.0, 16.0, 16.0)
+    c.fill()
+
+    assert_eq(green_at(&s, 16, 16), 255)
+    assert_eq(alpha_at(&s, 16, 16), 255)
+    assert_eq(alpha_at(&s, 2, 2), 0)
+    assert_eq(alpha_at(&s, 30, 30), 0)
+
+    c.close()
+    s.close()
+end fill_rect_covers_its_own_area
+
+@test("a colour's components reach the pixel in the right order")
+colour_components_are_not_swapped()
+    // The failure this catches is a binding that swaps red and blue, which is invisible in greyscale
+    // and in any test that only asks whether something was painted.
+    var s = surface(4, 4)
+    var c = canvas(&s)
+
+    c.rgb(1.0, 0.5, 0.0)
+    c.rect(0.0, 0.0, 4.0, 4.0)
+    c.fill()
+
+    assert_eq(red_at(&s, 1, 1), 255)
+    assert(green_at(&s, 1, 1) > 120 && green_at(&s, 1, 1) < 136)
+    assert_eq(blue_at(&s, 1, 1), 0)
+
+    c.close()
+    s.close()
+end colour_components_are_not_swapped
+
+@test("alpha is premultiplied, as the format says")
+alpha_is_premultiplied()
+    var s = surface(4, 4)
+    var c = canvas(&s)
+
+    // Half-transparent white over nothing: every component ends at half, not at full.
+    c.rgba(1.0, 1.0, 1.0, 0.5)
+    c.rect(0.0, 0.0, 4.0, 4.0)
+    c.fill()
+
+    assert(red_at(&s, 1, 1) > 120 && red_at(&s, 1, 1) < 136)
+    assert(alpha_at(&s, 1, 1) > 120 && alpha_at(&s, 1, 1) < 136)
+
+    c.close()
+    s.close()
+end alpha_is_premultiplied
+
+@test("a circle is round -- painted at its centre and not at its corner")
+a_circle_is_round()
+    var s = surface(32, 32)
+    var c = canvas(&s)
+
+    c.rgb(1.0, 1.0, 1.0)
+    c.circle(16.0, 16.0, 12.0)
+    c.fill()
+
+    assert_eq(alpha_at(&s, 16, 16), 255)
+    assert_eq(alpha_at(&s, 1, 1), 0)
+
+    c.close()
+    s.close()
+end a_circle_is_round
+
+@test("filling clears the path, so a second fill paints nothing")
+fill_consumes_the_path()
+    var s = surface(16, 16)
+    var c = canvas(&s)
+
+    c.rect(0.0, 0.0, 16.0, 16.0)
+    c.fill()
+
+    val before = c.fill_extents()
+
+    assert_eq(before.w, 0.0)
+
+    c.close()
+    s.close()
+end fill_consumes_the_path
+
+@test("fill_preserve keeps the path for a second use")
+fill_preserve_keeps_the_path()
+    var s = surface(16, 16)
+    var c = canvas(&s)
+
+    c.rect(2.0, 2.0, 8.0, 8.0)
+    c.fill_preserve()
+
+    val after = c.fill_extents()
+
+    assert_eq(after.w, 8.0)
+    assert_eq(after.h, 8.0)
+
+    c.close()
+    s.close()
+end fill_preserve_keeps_the_path
+
+// -- geometry ------------------------------------------------------------------------------------
+
+@test("a path's extents are its bounding box")
+extents_are_the_bounding_box()
+    var s = surface(64, 64)
+    var c = canvas(&s)
+
+    c.rect(10.0, 20.0, 30.0, 5.0)
+
+    val e = c.fill_extents()
+
+    assert_eq(e.x, 10.0)
+    assert_eq(e.y, 20.0)
+    assert_eq(e.w, 30.0)
+    assert_eq(e.h, 5.0)
+
+    c.close()
+    s.close()
+end extents_are_the_bounding_box
+
+@test("a point inside the path is inside it, and one outside is not")
+fill_contains_answers_honestly()
+    var s = surface(32, 32)
+    var c = canvas(&s)
+
+    c.circle(16.0, 16.0, 10.0)
+
+    assert(c.fill_contains(16.0, 16.0))
+    assert(!c.fill_contains(1.0, 1.0))
+
+    c.close()
+    s.close()
+end fill_contains_answers_honestly
+
+@test("a stroke is wider than the line it follows")
+stroke_extents_grow_with_the_width()
+    var s = surface(64, 64)
+    var c = canvas(&s)
+
+    c.line_width(4.0)
+    c.move_to(20.0, 32.0)
+    c.line_to(40.0, 32.0)
+
+    val e = c.stroke_extents()
+
+    // Two units either side of a horizontal line.
+    assert_eq(e.h, 4.0)
+
+    c.close()
+    s.close()
+end stroke_extents_grow_with_the_width
+
+// -- the transform -------------------------------------------------------------------------------
+
+@test("a translation moves what is drawn")
+translate_moves_the_drawing()
+    var s = surface(32, 32)
+    var c = canvas(&s)
+
+    c.translate(16.0, 16.0)
+    c.rgb(1.0, 1.0, 1.0)
+    c.rect(0.0, 0.0, 8.0, 8.0)
+    c.fill()
+
+    // Painted at (20, 20), not at (4, 4).
+    assert_eq(alpha_at(&s, 20, 20), 255)
+    assert_eq(alpha_at(&s, 4, 4), 0)
+
+    c.close()
+    s.close()
+end translate_moves_the_drawing
+
+@test("a scale multiplies what is drawn")
+scale_multiplies_the_drawing()
+    var s = surface(64, 64)
+    var c = canvas(&s)
+
+    c.scale(4.0, 4.0)
+    c.rgb(1.0, 1.0, 1.0)
+    c.rect(0.0, 0.0, 8.0, 8.0)
+    c.fill()
+
+    // An eight-unit square at four times the scale reaches 32 pixels.
+    assert_eq(alpha_at(&s, 30, 30), 255)
+    assert_eq(alpha_at(&s, 40, 40), 0)
+
+    c.close()
+    s.close()
+end scale_multiplies_the_drawing
+
+@test("resetting the transform undoes it")
+reset_transform_undoes_it()
+    var s = surface(32, 32)
+    var c = canvas(&s)
+
+    c.translate(16.0, 16.0)
+    c.reset_transform()
+    c.rgb(1.0, 1.0, 1.0)
+    c.rect(0.0, 0.0, 8.0, 8.0)
+    c.fill()
+
+    assert_eq(alpha_at(&s, 4, 4), 255)
+
+    c.close()
+    s.close()
+end reset_transform_undoes_it
+
+@test("save and restore put the state back")
+save_and_restore_restore_the_state()
+    var s = surface(32, 32)
+    var c = canvas(&s)
+
+    c.save()
+    c.translate(16.0, 16.0)
+    c.restore()
+
+    c.rgb(1.0, 1.0, 1.0)
+    c.rect(0.0, 0.0, 8.0, 8.0)
+    c.fill()
+
+    assert_eq(alpha_at(&s, 4, 4), 255)
+
+    c.close()
+    s.close()
+end save_and_restore_restore_the_state
+
+// -- clipping ------------------------------------------------------------------------------------
+
+@test("a clip stops paint reaching outside it")
+clip_confines_the_paint()
+    var s = surface(32, 32)
+    var c = canvas(&s)
+
+    c.rect(0.0, 0.0, 16.0, 16.0)
+    c.clip()
+
+    c.rgb(1.0, 1.0, 1.0)
+    c.rect(0.0, 0.0, 32.0, 32.0)
+    c.fill()
+
+    assert_eq(alpha_at(&s, 8, 8), 255)
+    assert_eq(alpha_at(&s, 24, 24), 0)
+
+    c.close()
+    s.close()
+end clip_confines_the_paint
+
+// -- gradients -----------------------------------------------------------------------------------
+
+@test("a linear gradient runs from one stop to the other")
+linear_gradient_runs_between_its_stops()
+    var s = surface(64, 8)
+    var c = canvas(&s)
+    var stops: [2]Stop = [Stop(0.0, 1.0, 0.0, 0.0, 1.0), Stop(1.0, 0.0, 0.0, 1.0, 1.0)]
+
+    assert(c.linear_gradient(0.0, 0.0, 64.0, 0.0, stops[..]))
+    c.rect(0.0, 0.0, 64.0, 8.0)
+    c.fill()
+
+    // Red at the left end, blue at the right, and neither at the other's end.
+    assert(red_at(&s, 1, 4) > 200)
+    assert(blue_at(&s, 1, 4) < 60)
+    assert(blue_at(&s, 62, 4) > 200)
+    assert(red_at(&s, 62, 4) < 60)
+
+    c.close()
+    s.close()
+end linear_gradient_runs_between_its_stops
+
+@test("a gradient with too many stops is refused rather than truncated")
+too_many_stops_is_refused()
+    var s = surface(8, 8)
+    var c = canvas(&s)
+    var stops: [40]Stop
+
+    assert(!c.linear_gradient(0.0, 0.0, 8.0, 0.0, stops[..]))
+
+    c.close()
+    s.close()
+end too_many_stops_is_refused
+
+// -- stroking ------------------------------------------------------------------------------------
+
+@test("a stroke paints along the line and not beside it")
+stroke_paints_the_line()
+    var s = surface(32, 32)
+    var c = canvas(&s)
+
+    c.rgb(1.0, 1.0, 1.0)
+    c.line_width(4.0)
+    c.move_to(0.0, 16.0)
+    c.line_to(32.0, 16.0)
+    c.stroke()
+
+    assert_eq(alpha_at(&s, 16, 16), 255)
+    assert_eq(alpha_at(&s, 16, 2), 0)
+
+    c.close()
+    s.close()
+end stroke_paints_the_line
+
+@test("a dash pattern leaves gaps")
+a_dash_leaves_gaps()
+    var s = surface(40, 8)
+    var c = canvas(&s)
+    var pattern: [2]f32 = [4.0, 4.0]
+
+    c.rgb(1.0, 1.0, 1.0)
+    c.line_width(4.0)
+    c.dash(pattern[..])
+    c.move_to(0.0, 4.0)
+    c.line_to(40.0, 4.0)
+    c.stroke()
+
+    // On for four, off for four: something is painted early on and something is not.
+    var painted = 0
+    var blank = 0
+
+    for x in 0..<40
+        if alpha_at(&s, x, 4) > 128 then painted += 1 else blank += 1
+
+    assert(painted > 0)
+    assert(blank > 0)
+
+    c.close()
+    s.close()
+end a_dash_leaves_gaps
+
+// -- the seam with a panel -------------------------------------------------------------------------
+
+@test("a band rendered into borrowed storage is ARGB32 the panel driver can convert")
+a_band_is_argb32()
+    // This is the arrangement `sh.sysl.st7796` expects: render a horizontal band into a buffer the
+    // caller owns, hand it over, reuse it. A full 320x480 surface at 32bpp is 600 KiB and does not fit
+    // on the machine this is for; a 16x4 band is the same shape, small enough to assert about.
+    var band: [256]u8
+
+    var s = for_data(band[..], 16, 4, 64)
+    var c = canvas(&s)
+
+    c.rgb(1.0, 0.0, 0.0)
+    c.rect(0.0, 0.0, 16.0, 4.0)
+    c.fill()
+
+    // B, G, R, A -- red is the third byte, and it is the caller's array that holds it.
+    assert_eq(band[0], 0)
+    assert_eq(band[1], 0)
+    assert_eq(band[2], 255)
+    assert_eq(band[3], 255)
+
+    c.close()
+    s.close()
+end a_band_is_argb32

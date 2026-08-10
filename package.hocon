@@ -1,0 +1,60 @@
+// PlutoVG for sysl — 2D vector graphics, bound to https://github.com/sammycage/plutovg.
+//
+// There is no `dependencies` block because PlutoVG depends on nothing: it is C99 with no external
+// libraries, and its source is carried in this package. There is no `brew` on a microcontroller and
+// no system PlutoVG on bare metal, so vendoring is forced rather than chosen — and it is what `qoi`,
+// `qcbor`, `monocypher` and `termbox2` already do.
+//
+// This is the block a *consumer* writes to reach this package, and resolution for it is built
+// (`design/packages.md` §§ 3-6): a `sysl build` fetches the coordinate, selects by MVS, checks what
+// arrived against `sysl.sum`, and compiles it as more modules.
+//
+//     dependencies {
+//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.1.0" }
+//     }
+//
+// The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
+// tag `v0.1.0` on this repository.
+
+package {
+  name    = "plutovg"
+  version = "0.1.0"
+}
+
+// **There is no `shim.c`, and that is the headline fact about this binding.**
+//
+// Not one public function in PlutoVG takes or returns a struct by value. Every parameter is a
+// `float`, an `int`, a pointer or a `const T*` — a colour is `const plutovg_color_t*`, a matrix is
+// `const plutovg_matrix_t*`, a rectangle is written through a `plutovg_rect_t*`. So the whole library
+// is reachable by declaring it, and the `UsefulBufC` gap that reshaped qcbor's entire API simply does
+// not arise. That is unusual enough to be the reason this library was chosen over its competitors.
+//
+// It is also `float` rather than `double` throughout, which matters on the target this is ultimately
+// for: a Cortex-M33's FPU is single-precision, and a library built on `double` would emulate every
+// coordinate in software.
+
+requires {
+  alloc = true
+  posix = true
+}
+
+// **`alloc` is honest and not yet avoidable.** PlutoVG mallocs its canvases, its path storage and its
+// glyph caches, and unlike QOI it has no `PLUTOVG_MALLOC` hook to point somewhere else — the
+// allocation calls are direct. `plutovg_surface_create_for_data` does keep the *pixels* out of the
+// heap, which is the large one and the reason a band-rendering program on a small machine is
+// practical at all, but the canvas itself still allocates.
+//
+// **`posix` is narrower than it looks: it is `write_png` and `font`, and nothing else.** The whole
+// drawing surface of this package touches no file system. A program that renders into a buffer it
+// owns, loads its font from bytes linked into the binary with `font_from_data`, and never writes a
+// PNG, uses no operating system at all — it is declared here because the two functions that do are
+// part of the package, and a capability is a property of the module rather than of the call.
+//
+// Getting either of these down to nothing is a real piece of work — redirecting the allocator would
+// need changes upstream — and is worth a card rather than a note. Neither blocks the desktop use this
+// package has today.
+
+// **What is NOT here is a `@link` directive**, and the absence is the point of vendoring: the
+// implementation is compiled from the sources carried in this package, so there is no external
+// library for the linker to be given (`15 §8`). Compare qcbor, which names `m` because its numeric
+// coercions reach `pow`.
