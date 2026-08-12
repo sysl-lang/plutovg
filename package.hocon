@@ -34,11 +34,11 @@ package {
 // coordinate in software.
 
 requires {
-  alloc = true
+  heap  = true
   posix = true
 }
 
-// **`alloc` is honest and not yet avoidable.** PlutoVG mallocs its canvases, its path storage and its
+// **`heap` is honest and not yet avoidable.** PlutoVG mallocs its canvases, its path storage and its
 // glyph caches, and unlike QOI it has no `PLUTOVG_MALLOC` hook to point somewhere else — the
 // allocation calls are direct. `plutovg_surface_create_for_data` does keep the *pixels* out of the
 // heap, which is the large one and the reason a band-rendering program on a small machine is
