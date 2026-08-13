@@ -1,0 +1,181 @@
+// PlutoVG's own surface, declared verbatim, and PlutoVG itself.
+//
+// **Everything that is C lives in this directory** — the twelve `.c` files, the headers they include,
+// and this one file of declarations over them. Nothing here is meant to be called by a program: every
+// name and every convention is C's, so a canvas is a pointer, a colour is four floats behind a
+// `const*`, and a string is a pointer and a length with an encoding beside it. The module above this
+// one turns those into sysl and is what an application imports.
+//
+// The split keeps two jobs apart. This one has to be **faithful** — a signature that disagrees with
+// the header links perfectly and corrupts the call at run time, and nothing in this arrangement checks
+// one against the other, so each declaration below was read out of `plutovg.h` rather than remembered.
+// The other one has to be **pleasant**, which is a different question and would otherwise be answered
+// in the same breath.
+//
+// **Every one of these takes scalars and pointers and nothing else.** Not one public function in the
+// library takes or returns a struct by value, so there is no shim here at all — the whole of PlutoVG
+// is reachable by declaring it.
+
+module sh.sysl.plutovg.c
+
+@include("plutovg.h")
+
+// ## The numbers, asked for rather than written down
+//
+// Each of these is what the C compiler computes for PlutoVG's own name, out of the header beside this
+// file, on the target being built. `15 §7` calls a transcribed constant "correct on one machine" with
+// "nothing checking it", and this is what it asks for instead — free here, because the header is
+// vendored and so needs no include path.
+
+c const
+    FILL_RULE_NON_ZERO: int = "PLUTOVG_FILL_RULE_NON_ZERO"
+    FILL_RULE_EVEN_ODD: int = "PLUTOVG_FILL_RULE_EVEN_ODD"
+
+    LINE_CAP_BUTT:   int = "PLUTOVG_LINE_CAP_BUTT"
+    LINE_CAP_ROUND:  int = "PLUTOVG_LINE_CAP_ROUND"
+    LINE_CAP_SQUARE: int = "PLUTOVG_LINE_CAP_SQUARE"
+
+    LINE_JOIN_MITER: int = "PLUTOVG_LINE_JOIN_MITER"
+    LINE_JOIN_ROUND: int = "PLUTOVG_LINE_JOIN_ROUND"
+    LINE_JOIN_BEVEL: int = "PLUTOVG_LINE_JOIN_BEVEL"
+
+    SPREAD_METHOD_PAD:     int = "PLUTOVG_SPREAD_METHOD_PAD"
+    SPREAD_METHOD_REFLECT: int = "PLUTOVG_SPREAD_METHOD_REFLECT"
+    SPREAD_METHOD_REPEAT:  int = "PLUTOVG_SPREAD_METHOD_REPEAT"
+
+    OPERATOR_CLEAR:    int = "PLUTOVG_OPERATOR_CLEAR"
+    OPERATOR_SRC:      int = "PLUTOVG_OPERATOR_SRC"
+    OPERATOR_DST:      int = "PLUTOVG_OPERATOR_DST"
+    OPERATOR_SRC_OVER: int = "PLUTOVG_OPERATOR_SRC_OVER"
+    OPERATOR_DST_OVER: int = "PLUTOVG_OPERATOR_DST_OVER"
+    OPERATOR_SRC_IN:   int = "PLUTOVG_OPERATOR_SRC_IN"
+    OPERATOR_DST_IN:   int = "PLUTOVG_OPERATOR_DST_IN"
+    OPERATOR_SRC_OUT:  int = "PLUTOVG_OPERATOR_SRC_OUT"
+    OPERATOR_DST_OUT:  int = "PLUTOVG_OPERATOR_DST_OUT"
+    OPERATOR_SRC_ATOP: int = "PLUTOVG_OPERATOR_SRC_ATOP"
+    OPERATOR_DST_ATOP: int = "PLUTOVG_OPERATOR_DST_ATOP"
+    OPERATOR_XOR:      int = "PLUTOVG_OPERATOR_XOR"
+
+    TEXT_ENCODING_UTF8: int = "PLUTOVG_TEXT_ENCODING_UTF8"
+
+// ## The handles
+//
+// Each of PlutoVG's three objects is reached only through a pointer, and an `opaque struct` is how
+// sysl says so: it publishes no layout, so nothing can read a field or make one by hand, and the
+// three cannot be handed to each other's functions the way three `*u8`s could.
+
+opaque struct Surface
+opaque struct Canvas
+opaque struct FontFace
+
+// ## Surfaces — `plutovg-surface.c`
+//
+// A surface is a block of premultiplied ARGB32 pixels. `create` allocates its own; `create_for_data`
+// borrows the caller's, which is the house pattern and what an embedded caller wants.
+
+extern "plutovg_surface_create" surface_create(width: int, height: int) -> *Surface
+extern "plutovg_surface_create_for_data" surface_create_for_data(data: *u8, width: int, height: int, stride: int) -> *Surface
+extern "plutovg_surface_destroy" surface_destroy(surface: *Surface)
+extern "plutovg_surface_get_data" surface_get_data(surface: *Surface) -> *u8
+
+// PlutoVG's objects are reference counted, which is what lets `&T` and `impl Drop` agree with the
+// library rather than fight it. Nothing above needs this, but a test does: it is how the claim that a
+// canvas keeps its surface alive is checked rather than asserted.
+extern "plutovg_surface_get_reference_count" surface_get_reference_count(surface: *Surface) -> int
+
+extern "plutovg_surface_get_width" surface_get_width(surface: *Surface) -> int
+extern "plutovg_surface_get_height" surface_get_height(surface: *Surface) -> int
+extern "plutovg_surface_get_stride" surface_get_stride(surface: *Surface) -> int
+extern "plutovg_surface_clear" surface_clear(surface: *Surface, colour: *f32)
+extern "plutovg_surface_write_to_png" surface_write_to_png(surface: *Surface, filename: *u8) -> bool
+
+// ## Canvases — `plutovg-canvas.c`
+
+extern "plutovg_canvas_create" canvas_create(surface: *Surface) -> *Canvas
+extern "plutovg_canvas_destroy" canvas_destroy(canvas: *Canvas)
+extern "plutovg_canvas_save" canvas_save(canvas: *Canvas)
+extern "plutovg_canvas_restore" canvas_restore(canvas: *Canvas)
+
+// ### Paint
+
+extern "plutovg_canvas_set_rgb" canvas_set_rgb(canvas: *Canvas, r: f32, g: f32, b: f32)
+extern "plutovg_canvas_set_rgba" canvas_set_rgba(canvas: *Canvas, r: f32, g: f32, b: f32, a: f32)
+extern "plutovg_canvas_set_opacity" canvas_set_opacity(canvas: *Canvas, opacity: f32)
+extern "plutovg_canvas_set_operator" canvas_set_operator(canvas: *Canvas, op: int)
+extern "plutovg_canvas_set_fill_rule" canvas_set_fill_rule(canvas: *Canvas, winding: int)
+
+// A gradient's stops are an array of `plutovg_gradient_stop_t`, which is `{ float offset;
+// plutovg_color_t color; }` — five floats, so the array is passed as a `*f32` of `5 * nstops`.
+extern "plutovg_canvas_set_linear_gradient" canvas_set_linear_gradient(
+    canvas: *Canvas, x1: f32, y1: f32, x2: f32, y2: f32,
+    spread: int, stops: *f32, nstops: int, matrix: *f32)
+
+extern "plutovg_canvas_set_radial_gradient" canvas_set_radial_gradient(
+    canvas: *Canvas, cx: f32, cy: f32, cr: f32, fx: f32, fy: f32, fr: f32,
+    spread: int, stops: *f32, nstops: int, matrix: *f32)
+
+// ### Stroking
+
+extern "plutovg_canvas_set_line_width" canvas_set_line_width(canvas: *Canvas, width: f32)
+extern "plutovg_canvas_set_line_cap" canvas_set_line_cap(canvas: *Canvas, cap: int)
+extern "plutovg_canvas_set_line_join" canvas_set_line_join(canvas: *Canvas, join: int)
+extern "plutovg_canvas_set_dash_offset" canvas_set_dash_offset(canvas: *Canvas, offset: f32)
+extern "plutovg_canvas_set_dash_array" canvas_set_dash_array(canvas: *Canvas, dashes: *f32, ndashes: int)
+
+// ### The transform
+
+extern "plutovg_canvas_translate" canvas_translate(canvas: *Canvas, tx: f32, ty: f32)
+extern "plutovg_canvas_scale" canvas_scale(canvas: *Canvas, sx: f32, sy: f32)
+extern "plutovg_canvas_rotate" canvas_rotate(canvas: *Canvas, angle: f32)
+extern "plutovg_canvas_reset_matrix" canvas_reset_matrix(canvas: *Canvas)
+extern "plutovg_canvas_set_matrix" canvas_set_matrix(canvas: *Canvas, matrix: *f32)
+extern "plutovg_canvas_get_matrix" canvas_get_matrix(canvas: *Canvas, matrix: *f32)
+
+// ### Building a path
+
+extern "plutovg_canvas_new_path" canvas_new_path(canvas: *Canvas)
+extern "plutovg_canvas_close_path" canvas_close_path(canvas: *Canvas)
+extern "plutovg_canvas_move_to" canvas_move_to(canvas: *Canvas, x: f32, y: f32)
+extern "plutovg_canvas_line_to" canvas_line_to(canvas: *Canvas, x: f32, y: f32)
+extern "plutovg_canvas_quad_to" canvas_quad_to(canvas: *Canvas, x1: f32, y1: f32, x2: f32, y2: f32)
+extern "plutovg_canvas_cubic_to" canvas_cubic_to(canvas: *Canvas, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32)
+extern "plutovg_canvas_arc_to" canvas_arc_to(canvas: *Canvas, rx: f32, ry: f32, angle: f32, large_arc: bool, sweep: bool, x: f32, y: f32)
+extern "plutovg_canvas_rect" canvas_rect(canvas: *Canvas, x: f32, y: f32, w: f32, h: f32)
+extern "plutovg_canvas_round_rect" canvas_round_rect(canvas: *Canvas, x: f32, y: f32, w: f32, h: f32, rx: f32, ry: f32)
+extern "plutovg_canvas_ellipse" canvas_ellipse(canvas: *Canvas, cx: f32, cy: f32, rx: f32, ry: f32)
+extern "plutovg_canvas_circle" canvas_circle(canvas: *Canvas, cx: f32, cy: f32, r: f32)
+extern "plutovg_canvas_arc" canvas_arc(canvas: *Canvas, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, ccw: bool)
+
+// ### Painting it
+
+extern "plutovg_canvas_fill" canvas_fill(canvas: *Canvas)
+extern "plutovg_canvas_stroke" canvas_stroke(canvas: *Canvas)
+extern "plutovg_canvas_clip" canvas_clip(canvas: *Canvas)
+extern "plutovg_canvas_fill_preserve" canvas_fill_preserve(canvas: *Canvas)
+extern "plutovg_canvas_stroke_preserve" canvas_stroke_preserve(canvas: *Canvas)
+extern "plutovg_canvas_clip_preserve" canvas_clip_preserve(canvas: *Canvas)
+extern "plutovg_canvas_fill_contains" canvas_fill_contains(canvas: *Canvas, x: f32, y: f32) -> bool
+extern "plutovg_canvas_stroke_contains" canvas_stroke_contains(canvas: *Canvas, x: f32, y: f32) -> bool
+extern "plutovg_canvas_clip_contains" canvas_clip_contains(canvas: *Canvas, x: f32, y: f32) -> bool
+
+// The extents are written into a `plutovg_rect_t`, which is four floats.
+extern "plutovg_canvas_fill_extents" canvas_fill_extents(canvas: *Canvas, extents: *f32)
+extern "plutovg_canvas_stroke_extents" canvas_stroke_extents(canvas: *Canvas, extents: *f32)
+extern "plutovg_canvas_clip_extents" canvas_clip_extents(canvas: *Canvas, extents: *f32)
+
+// ## Fonts and text — `plutovg-font.c`
+//
+// PlutoVG carries its own TrueType rasterizer (a vendored `stb_truetype`), so text needs no second
+// binding. `length` of -1 means the text is NUL-terminated.
+
+extern "plutovg_font_face_load_from_file" font_face_load_from_file(filename: *u8, ttcindex: int) -> *FontFace
+extern "plutovg_font_face_load_from_data" font_face_load_from_data(data: *u8, length: uint, ttcindex: int, destroy: *u8, closure: *u8) -> *FontFace
+extern "plutovg_font_face_destroy" font_face_destroy(face: *FontFace)
+extern "plutovg_font_face_get_metrics" font_face_get_metrics(face: *FontFace, size: f32, ascent: *f32, descent: *f32, line_gap: *f32, extents: *f32)
+
+extern "plutovg_canvas_set_font" canvas_set_font(canvas: *Canvas, face: *FontFace, size: f32)
+extern "plutovg_canvas_set_font_size" canvas_set_font_size(canvas: *Canvas, size: f32)
+extern "plutovg_canvas_fill_text" canvas_fill_text(canvas: *Canvas, text: *u8, length: int, encoding: int, x: f32, y: f32) -> f32
+extern "plutovg_canvas_stroke_text" canvas_stroke_text(canvas: *Canvas, text: *u8, length: int, encoding: int, x: f32, y: f32) -> f32
+extern "plutovg_canvas_add_text" canvas_add_text(canvas: *Canvas, text: *u8, length: int, encoding: int, x: f32, y: f32) -> f32
+extern "plutovg_canvas_text_extents" canvas_text_extents(canvas: *Canvas, text: *u8, length: int, encoding: int, extents: *f32) -> f32

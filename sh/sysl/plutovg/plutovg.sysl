@@ -10,16 +10,14 @@
 // A `Surface` is pixels. A `Canvas` draws on one. Between `begin` and `fill` you build a path, and
 // the canvas carries the state — colour, line width, transform, clip — that the fill or stroke uses.
 //
-//     var s = surface(200, 200)
-//     var c = canvas(&s)
+//     val s = surface(200, 200).unwrap()
+//     val cv = canvas(s).unwrap()
 //
-//     c.rgb(0.1, 0.2, 0.9)
-//     c.circle(100, 100, 60)
-//     c.fill()
+//     cv.rgb(0.1, 0.2, 0.9)
+//     cv.circle(100.0, 100.0, 60.0)
+//     cv.fill()
 //
 //     s.write_png("circle.png")
-//     c.close()
-//     s.close()
 //
 // ## Pixels
 //
@@ -28,130 +26,251 @@
 // to `sh.sysl.st7796`, which converts to RGB565 as it pushes.
 //
 // **`for_data` is the one to reach for on a small machine.** It borrows storage the caller already
-// owns rather than allocating, so a program can render a band at a time out of a fixed buffer: a full
-// 320x480 surface at 32bpp is 600 KiB, which does not fit on an RP2350, and 320x64 is 80 KiB, which
-// does.
+// owns rather than allocating pixels, so a program can render a band at a time out of a fixed buffer:
+// a full 320x480 surface at 32bpp is 600 KiB, which does not fit on an RP2350, and 320x64 is 80 KiB,
+// which does.
 //
-// ## Closing things
+// ## Nothing is closed by hand
 //
-// `Surface`, `Canvas` and `Font` each hold a C allocation and each has a `close`. They are not
-// released for you: sysl has no way to adopt a raw pointer as owned storage, so the library's
-// `destroy` is a call the caller makes. Closing twice is refused rather than left to corrupt the
-// heap — see `close` below.
+// There is no `close` in this API. `Surface`, `Canvas` and `Font` each hold a C allocation, each is
+// reached through `&T`, and each has an `impl Drop` that releases it when the last reference goes.
+// PlutoVG's objects are reference counted and so is `&T`, so the two agree — and they agree about
+// more than the caller's own variables. `plutovg_canvas_create` takes a count on the surface it draws
+// into, so a canvas keeps its surface alive whatever happens to the name the surface was made under.
+// The previous shape of this package asked the caller to call `close` in the right order and warned
+// about it in a comment.
+//
+// ## A constructor answers an Option, because PlutoVG answers null
+//
+// Every one of the four allocates, and each returns null when it cannot. That is not a formality on
+// the machine this package exists for: a 600 KiB surface on a microcontroller is exactly the request
+// that fails, and `font` also answers null for the ordinary case of a font file that is not there.
+// So the failure is in the type rather than in a `ok()` a caller can forget to ask.
 
 module sh.sysl.plutovg
 
-import sh.sysl.plutovg.externs
+import sh.sysl.plutovg.c
 import sysl.text.cstring
 import sysl.slices.as_ptr
 
-// ## Enumerations
+// ## The enumerations
 //
-// These are the C enum values, and they are `const` rather than sysl `enum`s deliberately: they cross
-// to C as plain `int`, and a sysl enum would need converting at every call. The names are the header's
-// own, shortened by their prefix.
+// **Each of PlutoVG's enumerations is a sysl enum**, so a wrong one cannot be passed: `operator`
+// takes an `Operator` and there is no way to hand it a `LineCap`, or a bare `3`. The previous shape
+// of this package made them `const … : int` on the argument that they cross to C as `int` and an enum
+// would need converting at every call. **The conversion turned out to be one `match` per type**, and
+// naming the values is worth more than it costs.
+//
+// Each carries one member, `code(self)`, for the number C wants. **None of them carries an `Other`
+// arm, and that is deliberate**: PlutoVG never *answers* one of these — every one is written to the
+// canvas and none is read back — so there is no unknown value to keep, and a simple enum has `Eq` for
+// free and no way to spell a meaningless one.
+//
+// The numbers themselves are not here. `code` asks the `c` module, which asks the C compiler for
+// PlutoVG's own name out of the header beside it.
 
 // How a path decides what is inside it when it crosses itself.
-const NON_ZERO: int = 0
-const EVEN_ODD: int = 1
+enum FillRule
+    NonZero
+    EvenOdd
+
+    code(self) -> int
+        self match
+            NonZero -> c.FILL_RULE_NON_ZERO
+            EvenOdd -> c.FILL_RULE_EVEN_ODD
+end FillRule
+
+impl Display for FillRule
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            NonZero -> "non-zero"
+            EvenOdd -> "even-odd"
+
+        display_str(s, out, fmt)
 
 // How a stroke ends.
-const CAP_BUTT: int = 0
-const CAP_ROUND: int = 1
-const CAP_SQUARE: int = 2
+enum LineCap
+    Butt
+    Round
+    Square
+
+    code(self) -> int
+        self match
+            Butt -> c.LINE_CAP_BUTT
+            Round -> c.LINE_CAP_ROUND
+            Square -> c.LINE_CAP_SQUARE
+end LineCap
+
+impl Display for LineCap
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Butt -> "butt"
+            Round -> "round"
+            Square -> "square"
+
+        display_str(s, out, fmt)
 
 // How two segments of a stroke meet.
-const JOIN_MITER: int = 0
-const JOIN_ROUND: int = 1
-const JOIN_BEVEL: int = 2
+enum LineJoin
+    Miter
+    Round
+    Bevel
+
+    code(self) -> int
+        self match
+            Miter -> c.LINE_JOIN_MITER
+            Round -> c.LINE_JOIN_ROUND
+            Bevel -> c.LINE_JOIN_BEVEL
+end LineJoin
+
+impl Display for LineJoin
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Miter -> "miter"
+            Round -> "round"
+            Bevel -> "bevel"
+
+        display_str(s, out, fmt)
 
 // What a gradient does outside its own span.
-const SPREAD_PAD: int = 0
-const SPREAD_REFLECT: int = 1
-const SPREAD_REPEAT: int = 2
+enum Spread
+    Pad
+    Reflect
+    Repeat
 
-// How source and destination are combined. `SRC_OVER` is the ordinary one and the default.
-const OP_CLEAR: int = 0
-const OP_SRC: int = 1
-const OP_DST: int = 2
-const OP_SRC_OVER: int = 3
-const OP_DST_OVER: int = 4
-const OP_SRC_IN: int = 5
-const OP_DST_IN: int = 6
-const OP_SRC_OUT: int = 7
+    code(self) -> int
+        self match
+            Pad -> c.SPREAD_METHOD_PAD
+            Reflect -> c.SPREAD_METHOD_REFLECT
+            Repeat -> c.SPREAD_METHOD_REPEAT
+end Spread
 
-// How the bytes of a string are read. sysl strings are UTF-8.
-private const ENCODING_UTF8: int = 1
+impl Display for Spread
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Pad -> "pad"
+            Reflect -> "reflect"
+            Repeat -> "repeat"
+
+        display_str(s, out, fmt)
+
+// How source and destination are combined. `SrcOver` is the ordinary one and PlutoVG's default.
+//
+// The previous shape of this package had eight of these. PlutoVG has twelve, and the four that were
+// missing — `DstOut`, `SrcAtop`, `DstAtop` and `Xor` — were not a decision anybody made: they are
+// what a hand-typed list looks like a while after the header moved.
+enum Operator
+    Clear
+    Src
+    Dst
+    SrcOver
+    DstOver
+    SrcIn
+    DstIn
+    SrcOut
+    DstOut
+    SrcAtop
+    DstAtop
+    Xor
+
+    code(self) -> int
+        self match
+            Clear -> c.OPERATOR_CLEAR
+            Src -> c.OPERATOR_SRC
+            Dst -> c.OPERATOR_DST
+            SrcOver -> c.OPERATOR_SRC_OVER
+            DstOver -> c.OPERATOR_DST_OVER
+            SrcIn -> c.OPERATOR_SRC_IN
+            DstIn -> c.OPERATOR_DST_IN
+            SrcOut -> c.OPERATOR_SRC_OUT
+            DstOut -> c.OPERATOR_DST_OUT
+            SrcAtop -> c.OPERATOR_SRC_ATOP
+            DstAtop -> c.OPERATOR_DST_ATOP
+            Xor -> c.OPERATOR_XOR
+end Operator
+
+impl Display for Operator
+    display(self, out: *Writer, fmt: FormatSpec)
+        val s = self match
+            Clear -> "clear"
+            Src -> "src"
+            Dst -> "dst"
+            SrcOver -> "src-over"
+            DstOver -> "dst-over"
+            SrcIn -> "src-in"
+            DstIn -> "dst-in"
+            SrcOut -> "src-out"
+            DstOut -> "dst-out"
+            SrcAtop -> "src-atop"
+            DstAtop -> "dst-atop"
+            Xor -> "xor"
+
+        display_str(s, out, fmt)
 
 // ## Surfaces
 
 // A block of pixels, premultiplied ARGB32.
 struct Surface
-    handle: *u8
-    borrowed: bool
+    handle: *c.Surface
 
-    // Whether the surface was actually made.
-    ok(self) -> bool = self.handle != null
-
-    width(self) -> int = externs.surface_get_width(self.handle)
-    height(self) -> int = externs.surface_get_height(self.handle)
+    width(&self) -> int = c.surface_get_width(self.handle)
+    height(&self) -> int = c.surface_get_height(self.handle)
 
     // The bytes between one row and the next, which is not always `width * 4`.
-    stride(self) -> int = externs.surface_get_stride(self.handle)
+    stride(&self) -> int = c.surface_get_stride(self.handle)
 
     // The pixels, as a slice over the surface's own storage.
     //
     // **The slice aliases the surface** — it is not a copy, and writing through it writes to the
-    // surface. It is valid for as long as the surface is.
-    data(self) -> []u8
-        val n = usize(externs.surface_get_stride(self.handle)) * usize(externs.surface_get_height(self.handle))
+    // surface.
+    data(&self) -> []u8
+        val n = usize(c.surface_get_stride(self.handle)) * usize(c.surface_get_height(self.handle))
 
-        externs.surface_get_data(self.handle)[0..<n]
+        c.surface_get_data(self.handle)[0..<n]
     end data
 
     // Paint every pixel one colour, ignoring any canvas state.
-    clear(self, r: f32, g: f32, b: f32, a: f32 = 1.0)
+    clear(&self, r: f32, g: f32, b: f32, a: f32 = 1.0)
         var colour: [4]f32
 
         colour[0] = r
         colour[1] = g
         colour[2] = b
         colour[3] = a
-        externs.surface_clear(self.handle, as_ptr(colour[..]))
+        c.surface_clear(self.handle, as_ptr(colour[..]))
 
     // Write the surface to a PNG file. Answers false if it could not be written.
     //
     // This is the one part of the package that touches a file system, and it is why `posix` is
     // required.
-    write_png(self, path: string) -> bool
+    write_png(&self, path: string) -> bool
         var cs = cstring(path)
 
-        externs.surface_write_to_png(self.handle, cs.ptr)
+        c.surface_write_to_png(self.handle, cs.ptr)
     end write_png
-
-    // Release the surface.
-    //
-    // **Closing twice is refused rather than left to corrupt the heap.** The handle is cleared, so a
-    // second call has nothing to release and does nothing. Storage lent by `for_data` is the
-    // caller's and is not touched.
-    close(*self)
-        if self.handle != null
-            externs.surface_destroy(self.handle)
-            self.handle = null
 end Surface
+
+impl Drop for Surface
+    drop(self) = c.surface_destroy(self.handle)
 
 // A surface with storage of its own, `width` by `height`. Every pixel starts fully transparent.
 //
-// Answers a surface whose `handle` is null if the allocation failed, which `ok` reports.
-surface(width: int, height: int) -> Surface = Surface(externs.surface_create(width, height), false)
+// `None` if the pixels could not be allocated, which is the case `for_data` exists to avoid.
+surface(width: int, height: int) -> Option[&Surface]
+    val h = c.surface_create(width, height)
+
+    if h == null then None else Some(Surface(h))
 
 // A surface over storage the caller already owns.
 //
-// **This is the one that matters on a small machine**, because it allocates nothing for the pixels.
-// `stride` is the bytes between one row and the next, normally `width * 4`. The caller's buffer must
-// outlive the surface, and closing the surface does not free it.
-for_data(pixels: []u8, width: int, height: int, stride: int) -> Surface =
-    Surface(externs.surface_create_for_data(as_ptr(pixels), width, height, stride), true)
+// **This is the one that matters on a small machine**, because it allocates no pixels — only the
+// small object that describes them, which is what the `None` here reports. `stride` is the bytes
+// between one row and the next, normally `width * 4`. Releasing the surface does not touch the
+// caller's buffer.
+for_data(pixels: []u8, width: int, height: int, stride: int) -> Option[&Surface]
+    val h = c.surface_create_for_data(as_ptr(pixels), width, height, stride)
+
+    if h == null then None else Some(Surface(h))
 
 // ## Gradients and rectangles
 
@@ -193,84 +312,74 @@ private to_rect(v: *f32) -> Rect = Rect(v[0], v[1], v[2], v[3])
 
 // Somewhere to draw, and the state a drawing operation uses.
 struct Canvas
-    handle: *u8
-
-
-    ok(self) -> bool = self.handle != null
-
-    // Release the canvas. Closing twice does nothing, as with a surface.
-    close(*self)
-        if self.handle != null
-            externs.canvas_destroy(self.handle)
-            self.handle = null
+    handle: *c.Canvas
 
     // Push the whole drawing state — colour, line width, transform, clip — and pop it again.
-    save(self) = externs.canvas_save(self.handle)
-    restore(self) = externs.canvas_restore(self.handle)
+    save(&self) = c.canvas_save(self.handle)
+    restore(&self) = c.canvas_restore(self.handle)
 
     // ## What to paint with
     //
     // Components run 0 to 1, not 0 to 255.
 
-    rgb(self, r: f32, g: f32, b: f32) = externs.canvas_set_rgb(self.handle, r, g, b)
-    rgba(self, r: f32, g: f32, b: f32, a: f32) = externs.canvas_set_rgba(self.handle, r, g, b, a)
+    rgb(&self, r: f32, g: f32, b: f32) = c.canvas_set_rgb(self.handle, r, g, b)
+    rgba(&self, r: f32, g: f32, b: f32, a: f32) = c.canvas_set_rgba(self.handle, r, g, b, a)
 
     // An overall multiplier on everything painted, on top of whatever alpha the colour has.
-    opacity(self, o: f32) = externs.canvas_set_opacity(self.handle, o)
+    opacity(&self, o: f32) = c.canvas_set_opacity(self.handle, o)
 
-    // How source and destination combine. One of the `OP_` constants.
-    operator(self, op: int) = externs.canvas_set_operator(self.handle, op)
+    // How source and destination combine.
+    operator(&self, op: Operator) = c.canvas_set_operator(self.handle, op.code())
 
-    // `NON_ZERO` or `EVEN_ODD`.
-    fill_rule(self, rule: int) = externs.canvas_set_fill_rule(self.handle, rule)
+    fill_rule(&self, rule: FillRule) = c.canvas_set_fill_rule(self.handle, rule.code())
 
     // Paint with a gradient along the line from one point to another.
     //
     // Answers false if there are more than `MAX_STOPS` stops, in which case nothing is set.
-    linear_gradient(self, x1: f32, y1: f32, x2: f32, y2: f32, stops: []Stop,
-                    spread: int = SPREAD_PAD) -> bool
+    linear_gradient(&self, x1: f32, y1: f32, x2: f32, y2: f32, stops: []Stop,
+                    spread: Spread = Spread.Pad) -> bool
         if stops.len > MAX_STOPS then return false
 
         var flat: [160]f32
         val n = flatten(stops, as_ptr(flat[..]))
 
-        externs.canvas_set_linear_gradient(self.handle, x1, y1, x2, y2, spread, as_ptr(flat[..]), n, null)
+        c.canvas_set_linear_gradient(self.handle, x1, y1, x2, y2, spread.code(), as_ptr(flat[..]), n, null)
         true
     end linear_gradient
 
     // Paint with a gradient spreading out from a focal point inside a circle.
-    radial_gradient(self, cx: f32, cy: f32, cr: f32, fx: f32, fy: f32, fr: f32,
-                    stops: []Stop, spread: int = SPREAD_PAD) -> bool
+    radial_gradient(&self, cx: f32, cy: f32, cr: f32, fx: f32, fy: f32, fr: f32,
+                    stops: []Stop, spread: Spread = Spread.Pad) -> bool
         if stops.len > MAX_STOPS then return false
 
         var flat: [160]f32
         val n = flatten(stops, as_ptr(flat[..]))
 
-        externs.canvas_set_radial_gradient(self.handle, cx, cy, cr, fx, fy, fr, spread, as_ptr(flat[..]), n, null)
+        c.canvas_set_radial_gradient(self.handle, cx, cy, cr, fx, fy, fr, spread.code(), as_ptr(flat[..]), n, null)
         true
     end radial_gradient
 
     // ## Stroking
 
-    line_width(self, w: f32) = externs.canvas_set_line_width(self.handle, w)
-    line_cap(self, cap: int) = externs.canvas_set_line_cap(self.handle, cap)
-    line_join(self, join: int) = externs.canvas_set_line_join(self.handle, join)
+    line_width(&self, w: f32) = c.canvas_set_line_width(self.handle, w)
+    line_cap(&self, cap: LineCap) = c.canvas_set_line_cap(self.handle, cap.code())
+    line_join(&self, join: LineJoin) = c.canvas_set_line_join(self.handle, join.code())
 
     // A dash pattern: on for the first length, off for the second, and so on, repeating. An empty array
     // draws solid.
-    dash(self, pattern: []f32, offset: f32 = 0.0)
-        externs.canvas_set_dash_offset(self.handle, offset)
-        externs.canvas_set_dash_array(self.handle, as_ptr(pattern), int(pattern.len))
+    dash(&self, pattern: []f32, offset: f32 = 0.0)
+        c.canvas_set_dash_offset(self.handle, offset)
+        c.canvas_set_dash_array(self.handle, as_ptr(pattern), int(pattern.len))
 
     // ## The transform
 
-    translate(self, tx: f32, ty: f32) = externs.canvas_translate(self.handle, tx, ty)
-    scale(self, sx: f32, sy: f32) = externs.canvas_scale(self.handle, sx, sy)
+    translate(&self, tx: f32, ty: f32) = c.canvas_translate(self.handle, tx, ty)
+    scale(&self, sx: f32, sy: f32) = c.canvas_scale(self.handle, sx, sy)
 
     // Rotate about the origin, in radians.
-    rotate(self, angle: f32) = externs.canvas_rotate(self.handle, angle)
+    rotate(&self, angle: f32) = c.canvas_rotate(self.handle, angle)
 
-    reset_transform(self) = externs.canvas_reset_matrix(self.handle)
+    reset_transform(&self) = c.canvas_reset_matrix(self.handle)
 
     // ## Building a path
     //
@@ -278,78 +387,113 @@ struct Canvas
     // `fill_preserve` and its siblings keep it for a second use.
 
     // Start a new path, discarding whatever was being built.
-    begin(self) = externs.canvas_new_path(self.handle)
+    begin(&self) = c.canvas_new_path(self.handle)
 
-    move_to(self, x: f32, y: f32) = externs.canvas_move_to(self.handle, x, y)
-    line_to(self, x: f32, y: f32) = externs.canvas_line_to(self.handle, x, y)
-    quad_to(self, x1: f32, y1: f32, x2: f32, y2: f32) = externs.canvas_quad_to(self.handle, x1, y1, x2, y2)
+    move_to(&self, x: f32, y: f32) = c.canvas_move_to(self.handle, x, y)
+    line_to(&self, x: f32, y: f32) = c.canvas_line_to(self.handle, x, y)
+    quad_to(&self, x1: f32, y1: f32, x2: f32, y2: f32) = c.canvas_quad_to(self.handle, x1, y1, x2, y2)
 
-    cubic_to(self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32) =
-        externs.canvas_cubic_to(self.handle, x1, y1, x2, y2, x3, y3)
+    cubic_to(&self, x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32) =
+        c.canvas_cubic_to(self.handle, x1, y1, x2, y2, x3, y3)
 
     // An elliptical arc to a point, in SVG's own terms.
-    arc_to(self, rx: f32, ry: f32, angle: f32, large_arc: bool, sweep: bool, x: f32, y: f32) =
-        externs.canvas_arc_to(self.handle, rx, ry, angle, large_arc, sweep, x, y)
+    arc_to(&self, rx: f32, ry: f32, angle: f32, large_arc: bool, sweep: bool, x: f32, y: f32) =
+        c.canvas_arc_to(self.handle, rx, ry, angle, large_arc, sweep, x, y)
 
     // Close the current subpath with a straight line back to where it began.
-    close_path(self) = externs.canvas_close_path(self.handle)
+    close_path(&self) = c.canvas_close_path(self.handle)
 
     // Whole shapes, each a subpath of its own.
-    rect(self, x: f32, y: f32, w: f32, h: f32) = externs.canvas_rect(self.handle, x, y, w, h)
+    rect(&self, x: f32, y: f32, w: f32, h: f32) = c.canvas_rect(self.handle, x, y, w, h)
 
-    round_rect(self, x: f32, y: f32, w: f32, h: f32, rx: f32, ry: f32) =
-        externs.canvas_round_rect(self.handle, x, y, w, h, rx, ry)
+    round_rect(&self, x: f32, y: f32, w: f32, h: f32, rx: f32, ry: f32) =
+        c.canvas_round_rect(self.handle, x, y, w, h, rx, ry)
 
-    ellipse(self, cx: f32, cy: f32, rx: f32, ry: f32) = externs.canvas_ellipse(self.handle, cx, cy, rx, ry)
-    circle(self, cx: f32, cy: f32, r: f32) = externs.canvas_circle(self.handle, cx, cy, r)
+    ellipse(&self, cx: f32, cy: f32, rx: f32, ry: f32) = c.canvas_ellipse(self.handle, cx, cy, rx, ry)
+    circle(&self, cx: f32, cy: f32, r: f32) = c.canvas_circle(self.handle, cx, cy, r)
 
     // An arc of a circle, from one angle to another in radians.
-    arc(self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, ccw: bool = false) =
-        externs.canvas_arc(self.handle, cx, cy, r, a0, a1, ccw)
+    arc(&self, cx: f32, cy: f32, r: f32, a0: f32, a1: f32, ccw: bool = false) =
+        c.canvas_arc(self.handle, cx, cy, r, a0, a1, ccw)
 
     // ## Painting it
 
-    fill(self) = externs.canvas_fill(self.handle)
-    stroke(self) = externs.canvas_stroke(self.handle)
+    fill(&self) = c.canvas_fill(self.handle)
+    stroke(&self) = c.canvas_stroke(self.handle)
 
     // Narrow the clip to the current path. It widens again at the next `restore`.
-    clip(self) = externs.canvas_clip(self.handle)
+    clip(&self) = c.canvas_clip(self.handle)
 
     // The same three, keeping the path for another use.
-    fill_preserve(self) = externs.canvas_fill_preserve(self.handle)
-    stroke_preserve(self) = externs.canvas_stroke_preserve(self.handle)
-    clip_preserve(self) = externs.canvas_clip_preserve(self.handle)
+    fill_preserve(&self) = c.canvas_fill_preserve(self.handle)
+    stroke_preserve(&self) = c.canvas_stroke_preserve(self.handle)
+    clip_preserve(&self) = c.canvas_clip_preserve(self.handle)
 
     // Whether a point is inside the current path, its stroke, or the clip.
-    fill_contains(self, x: f32, y: f32) -> bool = externs.canvas_fill_contains(self.handle, x, y)
-    stroke_contains(self, x: f32, y: f32) -> bool = externs.canvas_stroke_contains(self.handle, x, y)
-    clip_contains(self, x: f32, y: f32) -> bool = externs.canvas_clip_contains(self.handle, x, y)
+    fill_contains(&self, x: f32, y: f32) -> bool = c.canvas_fill_contains(self.handle, x, y)
+    stroke_contains(&self, x: f32, y: f32) -> bool = c.canvas_stroke_contains(self.handle, x, y)
+    clip_contains(&self, x: f32, y: f32) -> bool = c.canvas_clip_contains(self.handle, x, y)
 
     // The bounding box of what a fill or a stroke would cover, in the canvas's current coordinates.
-    fill_extents(self) -> Rect
+    fill_extents(&self) -> Rect
         var v: [4]f32
 
-        externs.canvas_fill_extents(self.handle, as_ptr(v[..]))
+        c.canvas_fill_extents(self.handle, as_ptr(v[..]))
         to_rect(as_ptr(v[..]))
     end fill_extents
 
-    stroke_extents(self) -> Rect
+    stroke_extents(&self) -> Rect
         var v: [4]f32
 
-        externs.canvas_stroke_extents(self.handle, as_ptr(v[..]))
+        c.canvas_stroke_extents(self.handle, as_ptr(v[..]))
         to_rect(as_ptr(v[..]))
     end stroke_extents
 
-    clip_extents(self) -> Rect
+    clip_extents(&self) -> Rect
         var v: [4]f32
 
-        externs.canvas_clip_extents(self.handle, as_ptr(v[..]))
+        c.canvas_clip_extents(self.handle, as_ptr(v[..]))
         to_rect(as_ptr(v[..]))
     end clip_extents
+
+    // ## Text
+
+    // Use this face, at this size, for the text calls below.
+    set_font(&self, f: &Font, size: f32) = c.canvas_set_font(self.handle, f.handle, size)
+    font_size(&self, size: f32) = c.canvas_set_font_size(self.handle, size)
+
+    // Draw text with its baseline starting at the given point, and answer how far it advanced.
+    fill_text(&self, text: string, x: f32, y: f32) -> f32 =
+        c.canvas_fill_text(self.handle, as_ptr(text.bytes), int(text.bytes.len), c.TEXT_ENCODING_UTF8, x, y)
+
+    stroke_text(&self, text: string, x: f32, y: f32) -> f32 =
+        c.canvas_stroke_text(self.handle, as_ptr(text.bytes), int(text.bytes.len), c.TEXT_ENCODING_UTF8, x, y)
+
+    // Add text to the current path without painting it, so it can be filled, stroked or clipped later.
+    add_text(&self, text: string, x: f32, y: f32) -> f32 =
+        c.canvas_add_text(self.handle, as_ptr(text.bytes), int(text.bytes.len), c.TEXT_ENCODING_UTF8, x, y)
+
+    // How much room the text would take, and how far it would advance.
+    text_extents(&self, text: string) -> TextExtents
+        var v: [4]f32
+        val advance = c.canvas_text_extents(self.handle, as_ptr(text.bytes), int(text.bytes.len),
+                                            c.TEXT_ENCODING_UTF8, as_ptr(v[..]))
+
+        TextExtents(advance, to_rect(as_ptr(v[..])))
+    end text_extents
 end Canvas
 
-// A canvas over a surface. The surface must outlive it.
-canvas(s: *Surface) -> Canvas = Canvas(externs.canvas_create(s.handle))
+impl Drop for Canvas
+    drop(self) = c.canvas_destroy(self.handle)
+
+// A canvas over a surface.
+//
+// **The surface does not have to be kept by hand.** PlutoVG takes a reference to it, so the canvas
+// holds the surface alive for as long as it lives, whatever the caller does with its own name for it.
+canvas(s: &Surface) -> Option[&Canvas]
+    val h = c.canvas_create(s.handle)
+
+    if h == null then None else Some(Canvas(h))
 
 // ## Text
 //
@@ -364,42 +508,48 @@ struct Metrics
     line_gap: f32
 end Metrics
 
-// A typeface.
-struct Font
-    handle: *u8
-
-    ok(self) -> bool = self.handle != null
-
-    close(*self)
-        if self.handle != null
-            externs.font_face_destroy(self.handle)
-            self.handle = null
-
-    // Use this face, at this size, for the text calls below.
-set_font(c: *Canvas, f: *Font, size: f32) = externs.canvas_set_font(c.handle, f.handle, size)
-font_size(c: *Canvas, size: f32) = externs.canvas_set_font_size(c.handle, size)
-
-// Draw text with its baseline starting at the given point, and answer how far it advanced.
-fill_text(c: *Canvas, text: string, x: f32, y: f32) -> f32 =
-    externs.canvas_fill_text(c.handle, as_ptr(text.bytes), int(text.bytes.len), ENCODING_UTF8, x, y)
-
-stroke_text(c: *Canvas, text: string, x: f32, y: f32) -> f32 =
-    externs.canvas_stroke_text(c.handle, as_ptr(text.bytes), int(text.bytes.len), ENCODING_UTF8, x, y)
-
-// Add text to the current path without painting it, so it can be filled, stroked or clipped later.
-add_text(c: *Canvas, text: string, x: f32, y: f32) -> f32 =
-    externs.canvas_add_text(c.handle, as_ptr(text.bytes), int(text.bytes.len), ENCODING_UTF8, x, y)
-
-// How much room the text would take, and how far it would advance.
+// How much room a piece of text would take, and how far it would advance.
 struct TextExtents
     advance: f32
     bounds: Rect
 end TextExtents
 
-text_extents(c: *Canvas, text: string) -> TextExtents
-    var v: [4]f32
-    val advance = externs.canvas_text_extents(c.handle, as_ptr(text.bytes), int(text.bytes.len),
-                                              ENCODING_UTF8, as_ptr(v[..]))
+// A typeface.
+struct Font
+    handle: *c.FontFace
 
-    TextExtents(advance, to_rect(as_ptr(v[..])))
-end text_extents
+    // The vertical metrics at a given size.
+    metrics(&self, size: f32) -> Metrics
+        var a: f32
+        var d: f32
+        var g: f32
+        var extents: [4]f32
+
+        c.font_face_get_metrics(self.handle, size, &a, &d, &g, as_ptr(extents[..]))
+        Metrics(a, d, g)
+    end metrics
+end Font
+
+impl Drop for Font
+    drop(self) = c.font_face_destroy(self.handle)
+
+// Load a typeface from a file. `None` if the file is not there or is not a font PlutoVG can read,
+// which is the ordinary case rather than an exceptional one.
+//
+// `index` picks a face out of a TrueType collection and is 0 for an ordinary font file.
+font(path: string, index: int = 0) -> Option[&Font]
+    var cs = cstring(path)
+    val h = c.font_face_load_from_file(cs.ptr, index)
+
+    if h == null then None else Some(Font(h))
+
+// Load a typeface from bytes the caller already has.
+//
+// **This is the one to reach for where there is no file system** — a font linked into the binary is
+// how a microcontroller gets one, and it is why `posix` is narrower than it looks. PlutoVG reads the
+// bytes in place and is given no destructor for them, so **the caller's storage must outlive the
+// face**; storage with static extent is the case this is for.
+font_from_data(bytes: []u8, index: int = 0) -> Option[&Font]
+    val h = c.font_face_load_from_data(as_ptr(bytes), uint(bytes.len), index, null, null)
+
+    if h == null then None else Some(Font(h))

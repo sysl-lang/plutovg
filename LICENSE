@@ -1,8 +1,8 @@
 This package contains two things under three licences.
 
 ================================================================================
-The sysl binding -- sh/sysl/plutovg/plutovg.sysl, externs/externs.sysl and
-tests.sysl -- is ISC:
+The sysl binding -- sh/sysl/plutovg/plutovg.sysl, c/c.sysl and tests.sysl --
+is ISC:
 ================================================================================
 
 ISC License (ISC)
@@ -15,7 +15,7 @@ THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH RE
 
 
 ================================================================================
-PlutoVG itself -- every .c and .h file in sh/sysl/plutovg/ -- is vendored from
+PlutoVG itself -- every .c and .h file in sh/sysl/plutovg/c/ -- is vendored from
 https://github.com/sammycage/plutovg and is MIT:
 ================================================================================
 

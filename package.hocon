@@ -10,28 +10,32 @@
 // arrived against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.1.0" }
+//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.0" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
-// tag `v0.1.0` on this repository.
+// tag `v0.2.0` on this repository.
 
 package {
   name    = "plutovg"
-  version = "0.1.0"
+  version = "0.2.0"
 }
 
 // **There is no `shim.c`, and that is the headline fact about this binding.**
 //
-// Not one public function in PlutoVG takes or returns a struct by value. Every parameter is a
-// `float`, an `int`, a pointer or a `const T*` — a colour is `const plutovg_color_t*`, a matrix is
-// `const plutovg_matrix_t*`, a rectangle is written through a `plutovg_rect_t*`. So the whole library
-// is reachable by declaring it, and the `UsefulBufC` gap that reshaped qcbor's entire API simply does
-// not arise. That is unusual enough to be the reason this library was chosen over its competitors.
+// Every parameter in PlutoVG's public surface is a `float`, an `int`, a pointer or a `const T*` — a
+// colour is `const plutovg_color_t*`, a matrix is `const plutovg_matrix_t*`, a rectangle is written
+// through a `plutovg_rect_t*` — so the whole library is reachable by declaring it. That is unusual
+// enough to be the reason this library was chosen over its competitors.
 //
 // It is also `float` rather than `double` throughout, which matters on the target this is ultimately
 // for: a Cortex-M33's FPU is single-precision, and a library built on `double` would emulate every
 // coordinate in software.
+//
+// **And there is no `requires { headers }` either**, which is the other half of vendoring. The
+// constants this binding uses are read out of `plutovg.h` by the C compiler rather than transcribed,
+// and that header is carried here beside the C it belongs to — so unlike `cairo` or the SDL3
+// packages, there is no directory for a consumer to be told about and no flag to forget.
 
 requires {
   heap  = true
