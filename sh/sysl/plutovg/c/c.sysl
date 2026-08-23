@@ -89,6 +89,12 @@ extern "plutovg_surface_get_stride" surface_get_stride(surface: *Surface) -> int
 extern "plutovg_surface_clear" surface_clear(surface: *Surface, colour: *f32)
 extern "plutovg_surface_write_to_png" surface_write_to_png(surface: *Surface, filename: *u8) -> bool
 
+// Decoding an image is stb_image's, vendored beside the library as `plutovg-stb-image.h`, so PNG,
+// JPEG, BMP, PSD, TGA, GIF, HDR, PIC and PNM all arrive through these two and nothing else has to be
+// linked. Both answer null on anything they cannot read, which includes a file that is not there.
+extern "plutovg_surface_load_from_image_file" surface_load_from_image_file(filename: *u8) -> *Surface
+extern "plutovg_surface_load_from_image_data" surface_load_from_image_data(data: *u8, length: int) -> *Surface
+
 // ## Canvases — `plutovg-canvas.c`
 
 extern "plutovg_canvas_create" canvas_create(surface: *Surface) -> *Canvas
@@ -127,6 +133,11 @@ extern "plutovg_canvas_set_dash_array" canvas_set_dash_array(canvas: *Canvas, da
 extern "plutovg_canvas_translate" canvas_translate(canvas: *Canvas, tx: f32, ty: f32)
 extern "plutovg_canvas_scale" canvas_scale(canvas: *Canvas, sx: f32, sy: f32)
 extern "plutovg_canvas_rotate" canvas_rotate(canvas: *Canvas, angle: f32)
+// Paint with the pixels of another surface. `kind` is 0 for plain and 1 for tiled, and a null matrix
+// means the surface is laid down in user space -- so the canvas's own transform places it.
+extern "plutovg_canvas_set_texture" canvas_set_texture(canvas: *Canvas, surface: *Surface, kind: int,
+                                                      opacity: f32, matrix: *f32)
+
 extern "plutovg_canvas_reset_matrix" canvas_reset_matrix(canvas: *Canvas)
 extern "plutovg_canvas_set_matrix" canvas_set_matrix(canvas: *Canvas, matrix: *f32)
 extern "plutovg_canvas_get_matrix" canvas_get_matrix(canvas: *Canvas, matrix: *f32)

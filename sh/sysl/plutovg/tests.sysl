@@ -12,6 +12,7 @@ module sh.sysl.plutovg
 @tests
 
 import sh.sysl.plutovg.c
+import sysl.fs.{remove_file}
 
 // The four components of the pixel at (x, y).
 private blue_at(s: &Surface, x: int, y: int) -> u8 = s.data()[usize(y * s.stride() + x * 4)]
@@ -542,3 +543,108 @@ a_band_is_argb32()
     assert_eq(band[2], 255)
     assert_eq(band[3], 255)
 end a_band_is_argb32
+
+// -- textures and image files --------------------------------------------------------------------
+
+@test("a texture paints another surface's pixels, cut to the shape that was filled")
+a_texture_paints_a_surface()
+    val src = surface(4, 4).unwrap()
+
+    src.clear(1.0, 0.0, 0.0)
+
+    val dst = surface(8, 8).unwrap()
+    val cv = canvas(dst).unwrap()
+
+    cv.texture(src)
+    cv.rect(0.0, 0.0, 4.0, 4.0)
+    cv.fill()
+
+    assert_eq(red_at(dst, 1, 1), 255)
+    assert_eq(alpha_at(dst, 1, 1), 255)
+
+    // **A texture is a paint source and not a drawing operation**, so what appears is the
+    // intersection of the surface and the path -- nothing outside the rectangle that was filled.
+    assert_eq(alpha_at(dst, 5, 5), 0)
+end a_texture_paints_a_surface
+
+@test("the canvas transform is what places a texture")
+a_texture_is_placed_by_the_transform()
+    val src = surface(4, 4).unwrap()
+
+    src.clear(0.0, 1.0, 0.0)
+
+    val dst = surface(8, 8).unwrap()
+    val cv = canvas(dst).unwrap()
+
+    cv.translate(4.0, 4.0)
+    cv.texture(src)
+    cv.rect(0.0, 0.0, 4.0, 4.0)
+    cv.fill()
+
+    assert_eq(green_at(dst, 5, 5), 255)
+    assert_eq(alpha_at(dst, 1, 1), 0, "and nothing was left at the origin")
+end a_texture_is_placed_by_the_transform
+
+@test("a tiled texture repeats where a plain one runs out")
+tiled_repeats_and_plain_does_not()
+    val src = surface(2, 2).unwrap()
+
+    src.clear(0.0, 0.0, 1.0)
+
+    val plain = surface(8, 8).unwrap()
+    val tiled = surface(8, 8).unwrap()
+    val one = canvas(plain).unwrap()
+    val two = canvas(tiled).unwrap()
+
+    one.texture(src, TextureType.Plain)
+    one.rect(0.0, 0.0, 8.0, 8.0)
+    one.fill()
+
+    two.texture(src, TextureType.Tiled)
+    two.rect(0.0, 0.0, 8.0, 8.0)
+    two.fill()
+
+    assert_eq(blue_at(plain, 1, 1), 255, "both cover the source's own two pixels")
+    assert_eq(blue_at(tiled, 1, 1), 255)
+    assert_eq(alpha_at(plain, 5, 5), 0, "and past them a plain texture is nothing")
+    assert_eq(blue_at(tiled, 5, 5), 255, "where a tiled one has started again")
+end tiled_repeats_and_plain_does_not
+
+@test("an image file that is not there answers None rather than a handle to nothing")
+a_missing_image_is_none()
+    assert(load_image("no-such-image-file.png").is_none())
+    assert(load_image("/").is_none(), "and a directory is not an image either")
+end a_missing_image_is_none
+
+@test("bytes that are not an image answer None too")
+bytes_that_are_not_an_image()
+    var rubbish: [8]u8
+
+    for i in 0..<8 do rubbish[i] = u8(i)
+
+    assert(image_from_data(rubbish[..]).is_none())
+    assert(image_from_data(rubbish[0..<0]).is_none(), "and no bytes at all is not an image")
+end bytes_that_are_not_an_image
+
+@test("a surface written as a PNG loads back as the same pixels")
+a_png_round_trips()
+    // **The only test here that touches a file system**, and it is worth the awkwardness: writing and
+    // reading are two halves of one claim, and either alone can pass while the pair is wrong -- a
+    // decoder that answered a surface of the right size full of nothing would satisfy every other
+    // assertion in this file.
+    val path = "plutovg-round-trip.png"
+    val src = surface(4, 4).unwrap()
+
+    src.clear(1.0, 0.5, 0.0)
+
+    assert(src.write_png(path), "the PNG was written")
+
+    val back = load_image(path).unwrap()
+
+    assert_eq(back.width(), 4)
+    assert_eq(back.height(), 4)
+    assert_eq(red_at(back, 2, 2), 255)
+    assert_eq(alpha_at(back, 2, 2), 255)
+
+    remove_file(path)
+end a_png_round_trips

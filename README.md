@@ -5,7 +5,7 @@ filling, stroking, dashing, gradients, clipping, transforms and text, rasterized
 
 ```
 dependencies {
-  plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.0" }
+  plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.1" }
 }
 ```
 
@@ -159,7 +159,7 @@ module rather than of the call.
 sysl test .
 ```
 
-Thirty-two, and **they are pixel tests**. A binding can be wrong in a way that compiles, links and
+Thirty-eight, and **they are pixel tests**. A binding can be wrong in a way that compiles, links and
 returns without complaint — a parameter in the wrong order, a float read as a double, an enum off by
 one — and the only thing that catches it is looking at what was drawn. So most of these rasterize
 something small and read the bytes back: that red is red and not blue, that alpha comes out
@@ -172,12 +172,40 @@ else. A third asks PlutoVG for its own reference count and checks that making a 
 surface's by one — the claim above, measured rather than asserted, and as a delta because the absolute
 number is the library's business.
 
+## Images
+
+```
+val logo = load_image("logo.png").unwrap()      // PNG, JPEG, BMP, PSD, TGA, GIF, HDR, PIC, PNM
+val icon = image_from_data(bytes).unwrap()      // the same, from memory
+
+cv.save()
+cv.translate(f32(x), f32(y))
+cv.scale(f32(w) / f32(logo.width()), f32(h) / f32(logo.height()))
+cv.texture(logo)
+cv.rect(0.0, 0.0, f32(logo.width()), f32(logo.height()))
+cv.fill()
+cv.restore()
+```
+
+**The decoder is stb_image, vendored beside the library**, so an image costs nothing linked that the
+package did not already carry — which is why loading belongs here rather than in a caller.
+
+**A texture is a paint source and not a drawing operation**, exactly like a colour or a gradient:
+nothing appears until something is filled with it, and *the shape that is filled is the shape the
+image is cut to*. That is what makes a round-cornered image a `round_rect` and not a feature.
+
+**It takes no matrix, deliberately.** The surface is laid down in user space, one pixel to one unit,
+so where it lands and how big it is are the canvas's own `translate` and `scale` — two ways of saying
+that would disagree the first time somebody used both. `TextureType.Tiled` is the other half:
+a plain texture is transparent past its own edge, a tiled one starts again.
+
 ## What is not bound yet
 
-Path objects (`plutovg_path_t`) and the traversal callbacks, texture paints, the font-face cache and
-its system-font loading, JPEG output, and image loading from files. The canvas API covers all of it in
-the shapes a program usually wants; these are the parts that need more of the library's own object
-model exposed, and none of them was needed to make the package useful.
+Path objects (`plutovg_path_t`) and the traversal callbacks, the paint object (`plutovg_paint_t`) and
+the explicit texture matrix, the font-face cache and its system-font loading, JPEG output, and
+base64 image data. The canvas API covers all of it in the shapes a program usually wants; these are
+the parts that need more of the library's own object model exposed, and none of them was needed to
+make the package useful.
 
 **Loading a real typeface has no test**, only the two refusals. It would need a font file, and a
 megabyte of somebody else's copyright to assert one number about is not a trade worth making — so

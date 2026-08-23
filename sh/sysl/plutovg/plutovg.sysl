@@ -261,6 +261,30 @@ surface(width: int, height: int) -> Option[&Surface]
 
     if h == null then None else Some(Surface(h))
 
+// A surface decoded from an image file: PNG, JPEG, BMP, PSD, TGA, GIF, HDR, PIC or PNM.
+//
+// **The decoder is stb_image, vendored beside the library**, so this needs nothing linked that the
+// package did not already carry -- which is the whole reason it is here rather than in a caller.
+// `None` covers every way it can fail at once: the file is not there, it is not an image, or it is
+// one stb cannot read.
+//
+// The pixels are the surface's own and are premultiplied on the way in, which is the format
+// everything else in this package speaks.
+load_image(path: string) -> Option[&Surface]
+    var cs = cstring(path)
+    val h = c.surface_load_from_image_file(cs.ptr)
+
+    if h == null then None else Some(Surface(h))
+end load_image
+
+// The same, from bytes already in memory -- an image inside an archive, one that arrived over a
+// socket, or one a program has built into itself.
+image_from_data(bytes: []const u8) -> Option[&Surface]
+    val h = c.surface_load_from_image_data(as_ptr(bytes), int(bytes.len))
+
+    if h == null then None else Some(Surface(h))
+end image_from_data
+
 // A surface over storage the caller already owns.
 //
 // **This is the one that matters on a small machine**, because it allocates no pixels — only the
@@ -271,6 +295,18 @@ for_data(pixels: []u8, width: int, height: int, stride: int) -> Option[&Surface]
     val h = c.surface_create_for_data(as_ptr(pixels), width, height, stride)
 
     if h == null then None else Some(Surface(h))
+
+// ## Textures
+
+// Whether a texture is laid down once or repeated.
+enum TextureType
+    Plain
+    Tiled
+
+    code(self) -> int = self match
+        Plain -> 0
+        Tiled -> 1
+end TextureType
 
 // ## Gradients and rectangles
 
@@ -358,6 +394,29 @@ struct Canvas
         c.canvas_set_radial_gradient(self.handle, cx, cy, cr, fx, fy, fr, spread.code(), as_ptr(flat[..]), n, null)
         true
     end radial_gradient
+
+    // Paint with the pixels of another surface.
+    //
+    // **The surface is laid down in user space, at the origin, one pixel to one unit** -- so where
+    // it lands and how big it is are the canvas's transform rather than parameters here. That is
+    // what `save`, `translate` and `scale` are already for, and it is why this takes no matrix: the
+    // two ways of saying it would disagree the first time somebody used both.
+    //
+    //     vg.save()
+    //     vg.translate(f32(x), f32(y))
+    //     vg.scale(f32(w) / f32(img.width()), f32(h) / f32(img.height()))
+    //     vg.texture(img)
+    //     vg.begin()
+    //     vg.rect(0.0, 0.0, f32(img.width()), f32(img.height()))
+    //     vg.fill()
+    //     vg.restore()
+    //
+    // **It is a paint source and not a drawing operation**, exactly like a colour or a gradient:
+    // nothing appears until something is filled with it, and the shape that is filled is the shape
+    // the image is cut to. A rounded rectangle path is how an image comes out with round corners,
+    // and there is nothing else to add for it.
+    texture(&self, s: &Surface, kind: TextureType = TextureType.Plain, opacity: f32 = 1.0) =
+        c.canvas_set_texture(self.handle, s.handle, kind.code(), opacity, null)
 
     // ## Stroking
 
