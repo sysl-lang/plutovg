@@ -3,6 +3,8 @@
 2D vector graphics for sysl, bound to [PlutoVG](https://github.com/sammycage/plutovg) — paths,
 filling, stroking, dashing, gradients, clipping, transforms and text, rasterized into memory.
 
+*An independent sysl package for PlutoVG. It is not affiliated with or endorsed by PlutoVG's authors or trademark holders.*
+
 ```
 dependencies {
   plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.1" }
