@@ -666,6 +666,19 @@ struct Font
         c.font_face_get_metrics(self.handle, size, &a, &d, &g, as_ptr(extents[..]))
         Metrics(a, d, g)
     end metrics
+
+    // The box that holds every glyph of the face at a given size: `x` and `y` are its top-left
+    // corner relative to the origin on the baseline (y grows downward, so `y` is negative above it),
+    // `w` and `h` its extent.
+    bounds(&self, size: f32) -> Rect
+        var a: f32
+        var d: f32
+        var g: f32
+        var extents: [4]f32
+
+        c.font_face_get_metrics(self.handle, size, &a, &d, &g, as_ptr(extents[..]))
+        Rect(extents[0], extents[1], extents[2], extents[3])
+    end bounds
 end Font
 
 impl Drop for Font
@@ -687,7 +700,7 @@ font(path: string, index: int = 0) -> Option[&Font]
 // how a microcontroller gets one, and it is why `posix` is narrower than it looks. PlutoVG reads the
 // bytes in place and is given no destructor for them, so **the caller's storage must outlive the
 // face**; storage with static extent is the case this is for.
-font_from_data(bytes: []u8, index: int = 0) -> Option[&Font]
+font_from_data(bytes: []const u8, index: int = 0) -> Option[&Font]
     val h = c.font_face_load_from_data(as_ptr(bytes), uint(bytes.len), index, null, null)
 
     if h == null then None else Some(Font(h))

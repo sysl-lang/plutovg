@@ -523,6 +523,30 @@ bytes_that_are_not_a_font()
     assert(font_from_data(notafont[..]).is_none())
 end bytes_that_are_not_a_font
 
+@test("a font embedded in the binary, a const view, loads and reports its bounds")
+a_const_font_loads()
+#if macos
+    val bytes = embed("/System/Library/Fonts/Helvetica.ttc")
+    val f = font_from_data(bytes).unwrap()
+    val b = f.bounds(20.0)
+    val m = f.metrics(20.0)
+
+    assert(b.w > 0.0, "the font's box has a width")
+    assert(b.h > 0.0, "and a height")
+    assert(b.h >= m.ascent, "and holds at least the ascent")
+    assert(font_from_data(bytes, 99).is_none(), "an index past the collection is refused")
+#else
+    skip("Helvetica is a font every macOS carries, and this is not macOS")
+#endif
+end a_const_font_loads
+
+@test("a const view of rubbish is not a font")
+a_const_view_of_rubbish()
+    val rubbish = embed("tests.sysl")
+
+    assert(font_from_data(rubbish).is_none())
+end a_const_view_of_rubbish
+
 // -- the font-face cache -------------------------------------------------------------------------
 //
 // **The faces these tests read are the ones every macOS install carries** in `/System/Library/Fonts`

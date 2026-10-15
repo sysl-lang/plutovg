@@ -10,15 +10,15 @@
 // arrived against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.3" }
+//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.4" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
-// tag `v0.2.3` on this repository.
+// tag `v0.2.4` on this repository.
 
 package {
   name    = "plutovg"
-  version = "0.2.3"
+  version = "0.2.4"
 }
 
 // **There is no `shim.c`, and that is the headline fact about this binding.**
