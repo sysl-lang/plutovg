@@ -7,7 +7,7 @@ filling, stroking, dashing, gradients, clipping, transforms and text, rasterized
 
 ```
 dependencies {
-  plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.1" }
+  plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.2" }
 }
 ```
 
@@ -51,8 +51,8 @@ The header was read rather than the README trusted, and the numbers are unusuall
 
 ## Nothing is closed by hand
 
-`Surface`, `Canvas` and `Font` each hold a C allocation, each is reached through `&T`, and each has an
-`impl Drop` that releases it when the last reference goes. **There is no `close` in this API.**
+`Surface`, `Canvas`, `Font` and `FontCache` each hold a C allocation, each is reached through `&T`,
+and each has an `impl Drop` that releases it when the last reference goes. **There is no `close` in this API.**
 PlutoVG's objects are reference counted and so is `&T`, so the two agree — and they agree about more
 than your own variables:
 
@@ -72,7 +72,8 @@ Storage lent by `for_data` is yours, and releasing the surface does not free it.
 when it cannot. That is not a formality on the machine this package exists for — a 600 KiB surface on
 a microcontroller is exactly the request that fails — and `font` answers `None` for the ordinary case
 of a file that is not there. So the failure is in the type rather than in an `ok()` you can forget to
-ask.
+ask. `font_cache` is the one exception: PlutoVG's cache constructor has no null to answer, so neither
+does it.
 
 ## Every enumeration is an enum
 
@@ -121,7 +122,7 @@ struct Surface
     width(&self) -> int = c.surface_get_width(self.handle)
 ```
 
-`c.Surface`, `c.Canvas` and `c.FontFace` are `opaque struct`s rather than `*u8`, so a canvas cannot be
+`c.Surface`, `c.Canvas`, `c.FontFace` and `c.FontFaceCache` are `opaque struct`s rather than `*u8`, so a canvas cannot be
 handed to a function that wants a surface. That costs nothing at run time.
 
 ## Rendering for a small machine
@@ -149,10 +150,10 @@ caches, and unlike QOI it has no `PLUTOVG_MALLOC` hook to redirect. `for_data` k
 of the heap, which is the large allocation and the reason band rendering is practical, but the canvas
 itself still allocates.
 
-**`posix` is `write_png` and `font`, and nothing else.** The whole drawing surface touches no file
+**`posix` is `write_png`, `font` and the font cache's file loaders, and nothing else.** The whole drawing surface touches no file
 system. A program that renders into its own buffer, loads a font from bytes linked into the binary
 with `font_from_data`, and never writes a PNG uses no operating system at all — the capability is
-declared because those two functions are part of the module, and a capability is a property of the
+declared because those functions are part of the module, and a capability is a property of the
 module rather than of the call.
 
 ## Tests
@@ -161,7 +162,7 @@ module rather than of the call.
 sysl test .
 ```
 
-Thirty-eight, and **they are pixel tests**. A binding can be wrong in a way that compiles, links and
+Forty-eight, and **they are pixel tests**. A binding can be wrong in a way that compiles, links and
 returns without complaint — a parameter in the wrong order, a float read as a double, an enum off by
 one — and the only thing that catches it is looking at what was drawn. So most of these rasterize
 something small and read the bytes back: that red is red and not blue, that alpha comes out
@@ -201,17 +202,50 @@ so where it lands and how big it is are the canvas's own `translate` and `scale`
 that would disagree the first time somebody used both. `TextureType.Tiled` is the other half:
 a plain texture is transparent past its own edge, a tiled one starts again.
 
+## Fonts by family name
+
+```
+val fonts = font_cache()
+
+fonts.load_system()                                  // or load_dir(path), load_file(path)
+val heading = fonts.get("Helvetica", bold = true).unwrap()
+
+cv.set_font_cache(fonts)                             // or let the canvas pick by name
+cv.font_size(14.0)
+cv.select_font("Helvetica", italic = true)
+```
+
+A `FontCache` files faces under a family name and a bold/italic pair. **The loaders read names, not
+glyphs**: `load_file`, `load_dir` and `load_system` open each font file just long enough to read its
+family name and its `head` style bits, so scanning every font on the machine costs a directory walk;
+the face is opened the first time `get` chooses it. `add` and `add_file` file a face under a name and
+style of your choosing.
+
+**A lookup is by exact family name and the closest style**: `"Helvetica"`, not `"helvetica"` or
+`"sans"`; among that family's faces, the one agreeing with the most of `bold` and `italic` wins. A
+program with generic names of its own maps them to families first.
+
+`load_system` scans `/Library/Fonts` and `/System/Library/Fonts` on macOS, `/usr/share/fonts` and
+`/usr/local/share/fonts` on Linux, and the Windows fonts directory — not the user's own font directory.
+
+A face `get` answers comes with a reference of its own, so it outlives a `reset` and the cache itself;
+a canvas given a cache takes a reference on it, and `clear_font_cache` gives it back. A canvas also
+makes a cache of its own when `add_font` or `add_font_file` is called without one.
+
+**The tests read Helvetica and Courier from `/System/Library/Fonts`**, which every macOS install
+carries, rather than a font file of this package's own; elsewhere those tests skip and say why. They
+check that each of `bold` and `italic` picks the face filed under it (Courier's `"iiii"` is far wider
+than Helvetica's), that `load_dir` recurses and ignores what is not a font, that the reference counts
+move by exactly one where this page says they do, and that a face drawn after its cache is gone
+still paints.
+
 ## What is not bound yet
 
 Path objects (`plutovg_path_t`) and the traversal callbacks, the paint object (`plutovg_paint_t`) and
-the explicit texture matrix, the font-face cache and its system-font loading, JPEG output, and
-base64 image data. The canvas API covers all of it in the shapes a program usually wants; these are
-the parts that need more of the library's own object model exposed, and none of them was needed to
-make the package useful.
-
-**Loading a real typeface has no test**, only the two refusals. It would need a font file, and a
-megabyte of somebody else's copyright to assert one number about is not a trade worth making — so
-`font` and `font_from_data` are exercised on the failing path and read on the succeeding one.
+the explicit texture matrix, glyph-level font metrics and paths, JPEG output, and base64 image data.
+The canvas API covers all of it in the shapes a program usually wants; these are the parts that need
+more of the library's own object model exposed, and none of them was needed to make the package
+useful.
 
 ## Licence
 

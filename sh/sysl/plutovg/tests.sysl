@@ -12,7 +12,8 @@ module sh.sysl.plutovg
 @tests
 
 import sh.sysl.plutovg.c
-import sysl.fs.{remove_file}
+import sysl.fs.{remove_file, make_temp_dir, make_dir, symlink, write_text, remove_dir_all}
+import sysl.testing.skip
 
 // The four components of the pixel at (x, y).
 private blue_at(s: &Surface, x: int, y: int) -> u8 = s.data()[usize(y * s.stride() + x * 4)]
@@ -507,7 +508,8 @@ end round_is_a_cap_and_a_join
 a_missing_font_is_none()
     // The ordinary failure rather than an exceptional one, which is why `font` answers an `Option`.
     // The other half of this -- loading a real face -- needs a font file, and this package carries
-    // none: it would be a megabyte of somebody else's copyright to assert one number about.
+    // none: it would be a megabyte of somebody else's copyright to assert one number about. The
+    // font-cache tests below load real faces from the fonts every macOS carries instead.
     assert(font("no-such-font-file.ttf").is_none())
     assert(font("/").is_none(), "and a directory is not a font either")
 end a_missing_font_is_none
@@ -520,6 +522,223 @@ bytes_that_are_not_a_font()
 
     assert(font_from_data(notafont[..]).is_none())
 end bytes_that_are_not_a_font
+
+// -- the font-face cache -------------------------------------------------------------------------
+//
+// **The faces these tests read are the ones every macOS install carries** in `/System/Library/Fonts`
+// -- Helvetica and Courier, both collections -- rather than a font file of this package's own, for
+// the reason `a_missing_font_is_none` gives. Elsewhere a test that needs them skips and says why.
+
+// A font file every macOS has, by its name in `/System/Library/Fonts`; anywhere else the test skips.
+private system_font(name: string) -> string
+#if macos
+    f"/System/Library/Fonts/${name}"
+#else
+    skip(f"${name} is a font every macOS carries, and this is not macOS")
+#endif
+end system_font
+
+// How far the text advances in this face at 20px, measured on a canvas of its own.
+private advance_in(f: &Font, text: string) -> f32
+    val cv = canvas(surface(4, 4).unwrap()).unwrap()
+
+    cv.set_font(f, 20.0)
+    cv.text_extents(text).advance
+end advance_in
+
+@test("an empty cache finds nothing, and loading nothing adds nothing")
+cache_of_nothing()
+    val cache = font_cache()
+
+    assert(cache.get("Helvetica").is_none())
+    assert_eq(cache.load_file("no-such-font-file.ttf"), 0)
+    assert_eq(cache.load_dir("no-such-font-directory"), 0)
+    assert(!cache.add_file("ui", "no-such-font-file.ttf"), "a file that is not there is not added")
+    assert(cache.get("ui").is_none(), "and leaves no entry behind")
+end cache_of_nothing
+
+@test("a font file's faces are filed under their own family and style")
+cache_loads_a_collection()
+    val path = system_font("Helvetica.ttc")
+    val cache = font_cache()
+
+    assert(cache.load_file(path) >= 4, "Helvetica.ttc holds regular, bold, oblique and bold oblique")
+
+    val regular = cache.get("Helvetica").unwrap()
+    val bold = cache.get("Helvetica", bold = true).unwrap()
+    val oblique = cache.get("Helvetica", italic = true).unwrap()
+    val both = cache.get("Helvetica", bold = true, italic = true).unwrap()
+
+    // Four different faces: bold is wider than regular, and oblique slants its ink to the right
+    // over the same advance.
+    assert(advance_in(bold, "Hello") > advance_in(regular, "Hello"), "bold is a different face")
+    assert(advance_in(both, "Hello") > advance_in(oblique, "Hello"), "and so is bold oblique")
+    assert(c.font_face_get_reference_count(regular.handle) == 2, "the cache's count and ours")
+    assert(regular.handle != oblique.handle && bold.handle != both.handle)
+
+    // The family name matches exactly: no case folding and no generic names.
+    assert(cache.get("helvetica").is_none())
+    assert(cache.get("sans-serif").is_none())
+end cache_loads_a_collection
+
+@test("the style asked for picks the face filed under it")
+cache_chooses_by_style()
+    // Two very different faces under one made-up family, so each flag has a face it must pick:
+    // Courier is monospaced, so its "iiii" is far wider than Helvetica's.
+    val cache = font_cache()
+
+    assert(cache.add_file("pair", system_font("Helvetica.ttc")))
+    assert(cache.add_file("pair", system_font("Courier.ttc"), bold = true))
+
+    val plain = cache.get("pair").unwrap()
+    val heavy = cache.get("pair", bold = true).unwrap()
+
+    assert(advance_in(heavy, "iiii") > advance_in(plain, "iiii") * 1.5, "bold = true found Courier")
+
+    val slanted = font_cache()
+
+    assert(slanted.add_file("pair", system_font("Helvetica.ttc")))
+    assert(slanted.add_file("pair", system_font("Courier.ttc"), italic = true))
+    assert(advance_in(slanted.get("pair", italic = true).unwrap(), "iiii") > advance_in(slanted.get("pair").unwrap(), "iiii") * 1.5,
+           "italic = true found Courier")
+
+    // The closest match stands in for a style nobody filed.
+    assert(cache.get("pair", italic = true).is_some())
+end cache_chooses_by_style
+
+@test("a face added by hand is shared with the cache, not handed over")
+cache_add_shares_the_face()
+    val f = font(system_font("Courier.ttc")).unwrap()
+    val cache = font_cache()
+
+    assert_eq(c.font_face_get_reference_count(f.handle), 1)
+
+    cache.add("mono", f, bold = true)
+
+    assert_eq(c.font_face_get_reference_count(f.handle), 2, "the cache took a reference of its own")
+
+    val got = cache.get("mono", bold = true).unwrap()
+
+    assert(got.handle == f.handle, "get answers that same face")
+    assert_eq(c.font_face_get_reference_count(f.handle), 3, "and the Font it answers holds one too")
+end cache_add_shares_the_face
+
+// A face got from a cache that is reset and then dropped before this returns.
+private face_from_a_dropped_cache() -> &Font
+    val cache = font_cache()
+
+    assert(cache.add_file("ui", system_font("Helvetica.ttc")))
+
+    val kept = cache.get("ui").unwrap()
+
+    cache.reset()
+    assert(cache.get("ui").is_none(), "a reset cache has forgotten the family")
+    assert_eq(c.font_face_get_reference_count(kept.handle), 1, "and the face is ours alone")
+    kept
+end face_from_a_dropped_cache
+
+@test("a face from the cache outlives a reset and the cache itself")
+cache_face_outlives_the_cache()
+    val s = surface(64, 32).unwrap()
+    val cv = canvas(s).unwrap()
+
+    cv.set_font(face_from_a_dropped_cache(), 24.0)
+    cv.rgb(0.0, 0.0, 0.0)
+    assert(cv.fill_text("H", 2.0, 26.0) > 0.0)
+    assert_eq(alpha_at(s, 4, 16), 255, "the left stem of the H was drawn")
+end cache_face_outlives_the_cache
+
+@test("a directory is loaded recursively, and only its font files")
+cache_loads_a_directory()
+    val dir = make_temp_dir("plutovg-fonts").unwrap()
+
+    make_dir(f"${dir}/nested").unwrap()
+    symlink(system_font("Courier.ttc"), f"${dir}/nested/Courier.ttc").unwrap()
+    write_text(f"${dir}/README.txt", "not a font").unwrap()
+
+    val cache = font_cache()
+    val n = cache.load_dir(dir)
+
+    assert_eq(n, font_cache().load_file(system_font("Courier.ttc")), "every face of the one font file, found a level down")
+    assert(n > 0)
+    assert(cache.get("Courier", bold = true).is_some())
+    assert(cache.get("Helvetica").is_none(), "and nothing that was not in the directory")
+
+    remove_dir_all(dir).unwrap()
+end cache_loads_a_directory
+
+@test("the system's fonts are found by family name")
+cache_loads_the_system_fonts()
+    val helvetica = system_font("Helvetica.ttc")
+    val cache = font_cache()
+
+    assert(cache.load_system() > font_cache().load_file(helvetica), "more than one file's worth of faces")
+
+    for family in ["Helvetica", "Courier", "Times"]
+        assert(cache.get(family).is_some(), family)
+        assert(cache.get(family, bold = true, italic = true).is_some(), family)
+    end for
+end cache_loads_the_system_fonts
+
+@test("a canvas with no cache selects nothing")
+canvas_without_a_cache()
+    val cv = canvas(surface(4, 4).unwrap()).unwrap()
+
+    assert(cv.font_cache().is_none())
+    assert(cv.font_face().is_none())
+    assert(!cv.select_font("Helvetica"))
+    assert(!cv.add_font_file("ui", "no-such-font-file.ttf"), "a file that is not there is not added")
+    assert(cv.font_cache().is_some(), "though asking to add one made the cache")
+    assert(!cv.select_font("ui"))
+end canvas_without_a_cache
+
+@test("a canvas selects its face by family name from the cache it is given")
+canvas_selects_from_a_cache()
+    val cache = font_cache()
+
+    assert(cache.add_file("ui", system_font("Helvetica.ttc")))
+    assert(cache.add_file("ui", system_font("Courier.ttc"), bold = true))
+
+    val cv = canvas(surface(4, 4).unwrap()).unwrap()
+
+    cv.set_font_cache(cache)
+    assert_eq(c.font_face_cache_reference_count(cache.handle), 2, "the canvas holds the cache too")
+    assert(cv.font_cache().unwrap().handle == cache.handle)
+
+    cv.font_size(20.0)
+    assert(cv.select_font("ui", bold = true))
+    assert(cv.font_face().unwrap().handle == cache.get("ui", bold = true).unwrap().handle)
+
+    val courier = cv.text_extents("iiii").advance
+
+    assert(cv.select_font("ui"))
+    assert(cv.text_extents("iiii").advance * 1.5 < courier, "the size stayed and the face changed")
+
+    assert(!cv.select_font("nothing"), "an unknown family is refused")
+    assert(cv.text_extents("iiii").advance * 1.5 < courier, "and leaves the face as it was")
+
+    cv.clear_font_cache()
+    assert(cv.font_cache().is_none())
+    assert_eq(c.font_face_cache_reference_count(cache.handle), 1, "and gave its reference back")
+end canvas_selects_from_a_cache
+
+@test("faces added to a canvas go into a cache it makes for itself")
+canvas_adds_its_own_faces()
+    val cv = canvas(surface(4, 4).unwrap()).unwrap()
+    val f = font(system_font("Courier.ttc")).unwrap()
+
+    cv.add_font("mono", f, italic = true)
+    assert(cv.add_font_file("sans", system_font("Helvetica.ttc")))
+
+    assert(cv.select_font("mono", italic = true))
+    assert(cv.font_face().unwrap().handle == f.handle)
+    assert(cv.select_font("sans"))
+    assert(cv.font_face().unwrap().handle != f.handle)
+
+    // The face can also be set directly, without the cache.
+    cv.set_font_face(f)
+    assert(cv.font_face().unwrap().handle == f.handle)
+end canvas_adds_its_own_faces
 
 // -- the seam with a panel -------------------------------------------------------------------------
 

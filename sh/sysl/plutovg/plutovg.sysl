@@ -32,20 +32,22 @@
 //
 // ## Nothing is closed by hand
 //
-// There is no `close` in this API. `Surface`, `Canvas` and `Font` each hold a C allocation, each is
-// reached through `&T`, and each has an `impl Drop` that releases it when the last reference goes.
-// PlutoVG's objects are reference counted and so is `&T`, so the two agree — and they agree about
-// more than the caller's own variables. `plutovg_canvas_create` takes a count on the surface it draws
-// into, so a canvas keeps its surface alive whatever happens to the name the surface was made under.
-// The previous shape of this package asked the caller to call `close` in the right order and warned
-// about it in a comment.
+// There is no `close` in this API. `Surface`, `Canvas`, `Font` and `FontCache` each hold a C
+// allocation, each is reached through `&T`, and each has an `impl Drop` that releases it when the
+// last reference goes. PlutoVG's objects are reference counted and so is `&T`, so the two agree — and
+// they agree about more than the caller's own variables. `plutovg_canvas_create` takes a count on the
+// surface it draws into, so a canvas keeps its surface alive whatever happens to the name the surface
+// was made under; a canvas given a `FontCache` keeps that alive the same way. A face or a cache that
+// PlutoVG answers from something else that owns it — `FontCache.get`, `Canvas.font_face` — comes back
+// with a count of its own, so it outlives its owner too.
 //
 // ## A constructor answers an Option, because PlutoVG answers null
 //
 // Every one of the four allocates, and each returns null when it cannot. That is not a formality on
 // the machine this package exists for: a 600 KiB surface on a microcontroller is exactly the request
 // that fails, and `font` also answers null for the ordinary case of a font file that is not there.
-// So the failure is in the type rather than in a `ok()` a caller can forget to ask.
+// So the failure is in the type rather than in a `ok()` a caller can forget to ask. `font_cache` is
+// the exception, because PlutoVG's cache constructor has no null to answer.
 
 module sh.sysl.plutovg
 
@@ -521,6 +523,59 @@ struct Canvas
     set_font(&self, f: &Font, size: f32) = c.canvas_set_font(self.handle, f.handle, size)
     font_size(&self, size: f32) = c.canvas_set_font_size(self.handle, size)
 
+    // Use this face for the text calls below, keeping the size that is already set.
+    set_font_face(&self, f: &Font) = c.canvas_set_font_face(self.handle, f.handle)
+
+    // The face the text calls use, or `None` before one has been set.
+    font_face(&self) -> Option[&Font]
+        val h = c.canvas_get_font_face(self.handle)
+
+        if h == null then None else Some(Font(c.font_face_reference(h)))
+    end font_face
+
+    // ## Faces by family name
+    //
+    // A canvas can carry a `FontCache` and pick its face out of it by name. It takes a reference on
+    // the cache it is given, so the cache lives as long as either holds it.
+
+    set_font_cache(&self, cache: &FontCache) = c.canvas_set_font_face_cache(self.handle, cache.handle)
+
+    // Drop the canvas's cache, if it has one. The face already selected stays selected.
+    clear_font_cache(&self) = c.canvas_set_font_face_cache(self.handle, null)
+
+    // The canvas's cache: the one it was given, or the one `add_font` made. `None` if it has neither.
+    font_cache(&self) -> Option[&FontCache]
+        val h = c.canvas_get_font_face_cache(self.handle)
+
+        if h == null then None else Some(FontCache(c.font_face_cache_reference(h)))
+    end font_cache
+
+    // File a face in the canvas's cache under a family name and style, making the cache if there is
+    // none yet.
+    add_font(&self, family: string, f: &Font, bold: bool = false, italic: bool = false)
+        var name = cstring(family)
+
+        c.canvas_add_font_face(self.handle, name.ptr, bold, italic, f.handle)
+    end add_font
+
+    // Load a font file into the canvas's cache under a family name and style. `false` if the file is
+    // not a font PlutoVG can read.
+    add_font_file(&self, family: string, path: string, bold: bool = false, italic: bool = false,
+                  index: int = 0) -> bool
+        var name = cstring(family)
+        var file = cstring(path)
+
+        c.canvas_add_font_file(self.handle, name.ptr, bold, italic, file.ptr, index)
+    end add_font_file
+
+    // Use the cache's closest match for this family and style, keeping the size that is already set.
+    // `false`, with the face left as it was, if the canvas has no cache or the family is not in it.
+    select_font(&self, family: string, bold: bool = false, italic: bool = false) -> bool
+        var name = cstring(family)
+
+        c.canvas_select_font_face(self.handle, name.ptr, bold, italic)
+    end select_font
+
     // Draw text with its baseline starting at the given point, and answer how far it advanced.
     fill_text(&self, text: string, x: f32, y: f32) -> f32 =
         c.canvas_fill_text(self.handle, as_ptr(text.bytes), int(text.bytes.len), c.TEXT_ENCODING_UTF8, x, y)
@@ -557,7 +612,8 @@ canvas(s: &Surface) -> Option[&Canvas]
 // ## Text
 //
 // PlutoVG carries its own TrueType rasterizer, so text needs no second binding and no system font
-// machinery. What it does need is a font file, which the caller supplies.
+// machinery. What it does need is a font: a file or bytes the caller supplies, or a face found by
+// family name in a `FontCache` (below), which can also scan the system's font directories.
 
 // How far the tallest glyph rises above the baseline, how far the deepest falls below it, and the
 // gap between lines, at a given size.
@@ -612,3 +668,83 @@ font_from_data(bytes: []u8, index: int = 0) -> Option[&Font]
     val h = c.font_face_load_from_data(as_ptr(bytes), uint(bytes.len), index, null, null)
 
     if h == null then None else Some(Font(h))
+
+// ## Faces by family name
+//
+// A `FontCache` files faces under a family name and a bold/italic pair, and answers the closest match
+// for a name and style. It is how a program that names its fonts ("Helvetica, bold") rather than
+// its font files finds them.
+//
+// **The loaders read names, not glyphs.** `load_file`, `load_dir` and `load_system` open each font
+// file just long enough to read its family name and its style bits, and record where the face is;
+// the face itself is opened the first time `get` chooses it. So loading every font on the machine
+// costs a directory walk and a few bytes per face, not the fonts.
+//
+// **A lookup is by exact family name and the closest style.** The family must match byte for byte
+// ("Helvetica", not "helvetica" or "sans"); among the faces of that family, the one agreeing with the
+// most of `bold` and `italic` wins. A program with generic names of its own maps them to families
+// before it asks.
+struct FontCache
+    handle: *c.FontFaceCache
+
+    // File a face under a family name and style. The cache takes its own reference to it.
+    add(&self, family: string, f: &Font, bold: bool = false, italic: bool = false)
+        var name = cstring(family)
+
+        c.font_face_cache_add(self.handle, name.ptr, bold, italic, f.handle)
+    end add
+
+    // Load a font file and file it under a family name and style of the caller's choosing. `false` if
+    // the file is not a font PlutoVG can read. `index` picks a face out of a TrueType collection.
+    add_file(&self, family: string, path: string, bold: bool = false, italic: bool = false,
+             index: int = 0) -> bool
+        var name = cstring(family)
+        var file = cstring(path)
+
+        c.font_face_cache_add_file(self.handle, name.ptr, bold, italic, file.ptr, index)
+    end add_file
+
+    // File every face in a font file -- each face of a collection -- under its own family name and
+    // style, and answer how many there were. 0 if the file is not there or is not a font.
+    load_file(&self, path: string) -> int
+        var file = cstring(path)
+
+        c.font_face_cache_load_file(self.handle, file.ptr)
+    end load_file
+
+    // `load_file` for every `.ttf`, `.otf`, `.ttc` and `.otc` under a directory, recursively, and
+    // answer how many faces there were.
+    load_dir(&self, path: string) -> int
+        var dir = cstring(path)
+
+        c.font_face_cache_load_dir(self.handle, dir.ptr)
+    end load_dir
+
+    // `load_dir` over the system's font directories, and answer how many faces there were: on macOS
+    // `/Library/Fonts` and `/System/Library/Fonts`; on Linux `/usr/share/fonts` and
+    // `/usr/local/share/fonts`; on Windows the Windows fonts directory. The user's own font
+    // directory is not among them.
+    load_system(&self) -> int = c.font_face_cache_load_sys(self.handle)
+
+    // The closest match for a family and style, or `None` if no face of that family is filed.
+    get(&self, family: string, bold: bool = false, italic: bool = false) -> Option[&Font]
+        var name = cstring(family)
+        val h = c.font_face_cache_get(self.handle, name.ptr, bold, italic)
+
+        // The cache keeps its own reference, so the `Font` handed out takes one of its own and
+        // outlives a `reset` or the cache itself.
+        if h == null then None else Some(Font(c.font_face_reference(h)))
+    end get
+
+    // Forget every face. A `Font` already handed out by `get` keeps working.
+    reset(&self) = c.font_face_cache_reset(self.handle)
+end FontCache
+
+impl Drop for FontCache
+    drop(self) = c.font_face_cache_destroy(self.handle)
+
+// An empty cache.
+//
+// **This one answers the cache itself rather than an `Option`**, because PlutoVG does: the cache is a
+// few words, and `plutovg_font_face_cache_create` has no null to answer.
+font_cache() -> &FontCache = FontCache(c.font_face_cache_create())

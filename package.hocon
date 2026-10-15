@@ -10,15 +10,15 @@
 // arrived against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.1" }
+//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.2" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
-// tag `v0.2.1` on this repository.
+// tag `v0.2.2` on this repository.
 
 package {
   name    = "plutovg"
-  version = "0.2.1"
+  version = "0.2.2"
 }
 
 // **There is no `shim.c`, and that is the headline fact about this binding.**
@@ -48,7 +48,8 @@ requires {
 // heap, which is the large one and the reason a band-rendering program on a small machine is
 // practical at all, but the canvas itself still allocates.
 //
-// **`posix` is narrower than it looks: it is `write_png` and `font`, and nothing else.** The whole
+// **`posix` is narrower than it looks: it is `write_png`, `font` and the font cache's file loaders,
+// and nothing else.** The whole
 // drawing surface of this package touches no file system. A program that renders into a buffer it
 // owns, loads its font from bytes linked into the binary with `font_from_data`, and never writes a
 // PNG, uses no operating system at all — it is declared here because the two functions that do are

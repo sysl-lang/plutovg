@@ -60,13 +60,14 @@ c const
 
 // ## The handles
 //
-// Each of PlutoVG's three objects is reached only through a pointer, and an `opaque struct` is how
+// Each of PlutoVG's four objects is reached only through a pointer, and an `opaque struct` is how
 // sysl says so: it publishes no layout, so nothing can read a field or make one by hand, and the
-// three cannot be handed to each other's functions the way three `*u8`s could.
+// four cannot be handed to each other's functions the way four `*u8`s could.
 
 opaque struct Surface
 opaque struct Canvas
 opaque struct FontFace
+opaque struct FontFaceCache
 
 // ## Surfaces — `plutovg-surface.c`
 //
@@ -181,8 +182,40 @@ extern "plutovg_canvas_clip_extents" canvas_clip_extents(canvas: *Canvas, extent
 
 extern "plutovg_font_face_load_from_file" font_face_load_from_file(filename: *u8, ttcindex: int) -> *FontFace
 extern "plutovg_font_face_load_from_data" font_face_load_from_data(data: *u8, length: uint, ttcindex: int, destroy: *u8, closure: *u8) -> *FontFace
+extern "plutovg_font_face_reference" font_face_reference(face: *FontFace) -> *FontFace
 extern "plutovg_font_face_destroy" font_face_destroy(face: *FontFace)
+extern "plutovg_font_face_get_reference_count" font_face_get_reference_count(face: *FontFace) -> int
 extern "plutovg_font_face_get_metrics" font_face_get_metrics(face: *FontFace, size: f32, ascent: *f32, descent: *f32, line_gap: *f32, extents: *f32)
+
+// ## The font-face cache — `plutovg-font.c`
+//
+// A cache maps a family name and a bold/italic pair to a face. `load_file`, `load_dir` and `load_sys`
+// read each file's own family name and style bits and record where the face lives; the face itself
+// is opened the first time `get` selects it. `get` answers a face the cache still owns — a caller
+// that keeps it takes its own reference. The three loaders answer -1 only when PlutoVG was built
+// with `PLUTOVG_DISABLE_FONT_FACE_CACHE_LOAD`, which this package does not define.
+
+extern "plutovg_font_face_cache_create" font_face_cache_create() -> *FontFaceCache
+extern "plutovg_font_face_cache_reference" font_face_cache_reference(cache: *FontFaceCache) -> *FontFaceCache
+extern "plutovg_font_face_cache_destroy" font_face_cache_destroy(cache: *FontFaceCache)
+extern "plutovg_font_face_cache_reference_count" font_face_cache_reference_count(cache: *FontFaceCache) -> int
+extern "plutovg_font_face_cache_reset" font_face_cache_reset(cache: *FontFaceCache)
+extern "plutovg_font_face_cache_add" font_face_cache_add(cache: *FontFaceCache, family: *u8, bold: bool, italic: bool, face: *FontFace)
+extern "plutovg_font_face_cache_add_file" font_face_cache_add_file(cache: *FontFaceCache, family: *u8, bold: bool, italic: bool, filename: *u8, ttcindex: int) -> bool
+extern "plutovg_font_face_cache_get" font_face_cache_get(cache: *FontFaceCache, family: *u8, bold: bool, italic: bool) -> *FontFace
+extern "plutovg_font_face_cache_load_file" font_face_cache_load_file(cache: *FontFaceCache, filename: *u8) -> int
+extern "plutovg_font_face_cache_load_dir" font_face_cache_load_dir(cache: *FontFaceCache, dirname: *u8) -> int
+extern "plutovg_font_face_cache_load_sys" font_face_cache_load_sys(cache: *FontFaceCache) -> int
+
+// A canvas holds a cache of its own (made on first use by `add_font_face`/`add_font_file`) or the one
+// it is given, and takes a reference on it; `select_font_face` looks a face up in it.
+extern "plutovg_canvas_set_font_face_cache" canvas_set_font_face_cache(canvas: *Canvas, cache: *FontFaceCache)
+extern "plutovg_canvas_get_font_face_cache" canvas_get_font_face_cache(canvas: *Canvas) -> *FontFaceCache
+extern "plutovg_canvas_add_font_face" canvas_add_font_face(canvas: *Canvas, family: *u8, bold: bool, italic: bool, face: *FontFace)
+extern "plutovg_canvas_add_font_file" canvas_add_font_file(canvas: *Canvas, family: *u8, bold: bool, italic: bool, filename: *u8, ttcindex: int) -> bool
+extern "plutovg_canvas_select_font_face" canvas_select_font_face(canvas: *Canvas, family: *u8, bold: bool, italic: bool) -> bool
+extern "plutovg_canvas_set_font_face" canvas_set_font_face(canvas: *Canvas, face: *FontFace)
+extern "plutovg_canvas_get_font_face" canvas_get_font_face(canvas: *Canvas) -> *FontFace
 
 extern "plutovg_canvas_set_font" canvas_set_font(canvas: *Canvas, face: *FontFace, size: f32)
 extern "plutovg_canvas_set_font_size" canvas_set_font_size(canvas: *Canvas, size: f32)
