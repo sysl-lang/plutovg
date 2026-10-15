@@ -7,7 +7,7 @@ filling, stroking, dashing, gradients, clipping, transforms and text, rasterized
 
 ```
 dependencies {
-  plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.2" }
+  plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.3" }
 }
 ```
 
@@ -242,7 +242,7 @@ still paints.
 ## What is not bound yet
 
 Path objects (`plutovg_path_t`) and the traversal callbacks, the paint object (`plutovg_paint_t`) and
-the explicit texture matrix, glyph-level font metrics and paths, JPEG output, and base64 image data.
+the explicit texture matrix, glyph-level font metrics and paths, and base64 image data.
 The canvas API covers all of it in the shapes a program usually wants; these are the parts that need
 more of the library's own object model exposed, and none of them was needed to make the package
 useful.

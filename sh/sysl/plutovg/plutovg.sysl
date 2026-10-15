@@ -54,6 +54,7 @@ module sh.sysl.plutovg
 import sh.sysl.plutovg.c
 import sysl.text.cstring
 import sysl.slices.as_ptr
+import sysl.buf.{Buf, buf}
 
 // ## The enumerations
 //
@@ -250,7 +251,29 @@ struct Surface
 
         c.surface_write_to_png(self.handle, cs.ptr)
     end write_png
+
+    // The surface encoded as a PNG, in memory: `None` if the encoder failed. Needs no file system.
+    png_bytes(&self) -> Option[Buf[u8]]
+        var out: Buf[u8] = buf()
+
+        if c.surface_write_to_png_stream(self.handle, &collect_chunk, ptr_cast(&out)) then Some(out) else None
+    end png_bytes
+
+    // The surface encoded as a JPEG at `quality` (1 to 100), in memory: `None` if the encoder failed.
+    // JPEG has no alpha, so transparent pixels are encoded as their colour channels alone.
+    jpg_bytes(&self, quality: int = 90) -> Option[Buf[u8]]
+        var out: Buf[u8] = buf()
+
+        if c.surface_write_to_jpg_stream(self.handle, &collect_chunk, ptr_cast(&out), quality) then Some(out) else None
+    end jpg_bytes
 end Surface
+
+// What the stream writers call with each encoded chunk: `closure` is the `Buf[u8]` being filled.
+private collect_chunk(closure: *u8, data: *u8, size: int)
+    val out: *Buf[u8] = ptr_cast(closure)
+
+    out.extend(data[0..<usize(size)])
+end collect_chunk
 
 impl Drop for Surface
     drop(self) = c.surface_destroy(self.handle)

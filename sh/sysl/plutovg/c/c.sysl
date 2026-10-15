@@ -90,6 +90,13 @@ extern "plutovg_surface_get_stride" surface_get_stride(surface: *Surface) -> int
 extern "plutovg_surface_clear" surface_clear(surface: *Surface, colour: *f32)
 extern "plutovg_surface_write_to_png" surface_write_to_png(surface: *Surface, filename: *u8) -> bool
 
+// The stream writers hand each encoded chunk to a callback with the caller's `closure` pointer, so
+// no file system is involved. The callback has the C shape `void (*)(void*, void*, int)`.
+extern "plutovg_surface_write_to_png_stream" surface_write_to_png_stream(surface: *Surface,
+    f: *extern(*u8, *u8, int) -> unit, closure: *u8) -> bool
+extern "plutovg_surface_write_to_jpg_stream" surface_write_to_jpg_stream(surface: *Surface,
+    f: *extern(*u8, *u8, int) -> unit, closure: *u8, quality: int) -> bool
+
 // Decoding an image is stb_image's, vendored beside the library as `plutovg-stb-image.h`, so PNG,
 // JPEG, BMP, PSD, TGA, GIF, HDR, PIC and PNM all arrive through these two and nothing else has to be
 // linked. Both answer null on anything they cannot read, which includes a file that is not there.
