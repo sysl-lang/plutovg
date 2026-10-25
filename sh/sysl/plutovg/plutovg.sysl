@@ -54,6 +54,7 @@ module sh.sysl.plutovg
 import sh.sysl.plutovg.c
 import sysl.text.cstring
 import sysl.slices.as_ptr
+import sysl.raw.ptr_cast
 import sysl.buf.{Buf, buf}
 
 // ## The enumerations

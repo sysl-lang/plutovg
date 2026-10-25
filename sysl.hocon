@@ -19,6 +19,7 @@
 package {
   name    = "plutovg"
   version = "0.2.4"
+  sysl    = "0.6.0"
 }
 
 // **There is no `shim.c`, and that is the headline fact about this binding.**
