@@ -7,7 +7,7 @@ filling, stroking, dashing, gradients, clipping, transforms and text, rasterized
 
 ```
 dependencies {
-  plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.4" }
+  plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.6" }
 }
 ```
 
@@ -255,3 +255,19 @@ The sysl binding is **ISC**. PlutoVG itself is **MIT**. Its rasterizer and strok
 FreeType and carry the **FreeType Licence** (`FTL.TXT`), whose one live obligation is to credit
 FreeType in the documentation of a product that uses it — this paragraph is that credit. The three
 vendored `stb` headers are public domain.
+
+## Embedded rendering
+
+Version 0.2.6 separates memory rendering from the host file APIs. Firmware can
+use `for_data` and `font_from_data` without a POSIX environment. The firmware
+supplies a C runtime (for example newlib), an allocator and bounded memory.
+File-loading methods are gated on POSIX, and free file-loading functions declare
+that requirement. Cortex-M/freestanding C builds disable file/directory loaders
+and image writing; memory rendering and the TrueType rasterizer remain active.
+
+`surface_create_for_data` also checks allocation failure before initializing its
+surface object, preserving the binding's `None` failure contract on a small heap.
+
+This path is validated by the optional PlutoVG painter in `imui`, through actual
+flash-linked Cortex-M33 firmware running in Benchtop. It loads an OFL font from
+flash and transmits RGB565 output to an emulated ST7789 touchscreen setup.

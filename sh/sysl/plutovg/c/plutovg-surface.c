@@ -39,6 +39,8 @@ plutovg_surface_t* plutovg_surface_create(int width, int height)
 plutovg_surface_t* plutovg_surface_create_for_data(unsigned char* data, int width, int height, int stride)
 {
     plutovg_surface_t* surface = malloc(sizeof(plutovg_surface_t));
+    if(surface == NULL)
+        return NULL;
     plutovg_init_reference(surface);
     surface->width = width;
     surface->height = height;
@@ -56,6 +58,7 @@ static plutovg_surface_t* plutovg_surface_load_from_image(stbi_uc* image, int wi
     return surface;
 }
 
+#ifndef PLUTOVG_FREESTANDING
 plutovg_surface_t* plutovg_surface_load_from_image_file(const char* filename)
 {
     int width, height, channels;
@@ -64,6 +67,14 @@ plutovg_surface_t* plutovg_surface_load_from_image_file(const char* filename)
         return NULL;
     return plutovg_surface_load_from_image(image, width, height);
 }
+
+#else
+plutovg_surface_t* plutovg_surface_load_from_image_file(const char* filename)
+{
+    (void)filename;
+    return NULL;
+}
+#endif
 
 plutovg_surface_t* plutovg_surface_load_from_image_data(const void* data, int length)
 {

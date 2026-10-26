@@ -1,6 +1,14 @@
 #ifndef PLUTOVG_PRIVATE_H
 #define PLUTOVG_PRIVATE_H
 
+// Memory rendering remains available without files or a hosted runtime.
+#if (defined(__STDC_HOSTED__) && !__STDC_HOSTED__) || defined(__ARM_ARCH_PROFILE) && __ARM_ARCH_PROFILE == 'M'
+#define PLUTOVG_FREESTANDING 1
+#define PLUTOVG_DISABLE_FONT_FACE_CACHE_LOAD
+#define PLUTOVG_DISABLE_IMAGE_WRITE
+#define STBI_NO_STDIO
+#endif
+
 #include "plutovg.h"
 
 #if defined(_WIN32)
