@@ -247,11 +247,13 @@ struct Surface
     //
     // This is the one part of the package that touches a file system, and it is why `posix` is
     // required.
+#if posix
     write_png(&self, path: string) -> bool
         var cs = cstring(path)
 
         c.surface_write_to_png(self.handle, cs.ptr)
     end write_png
+#endif
 
     // The surface encoded as a PNG, in memory: `None` if the encoder failed. Needs no file system.
     png_bytes(&self) -> Option[Buf[u8]]
@@ -296,6 +298,7 @@ surface(width: int, height: int) -> Option[&Surface]
 //
 // The pixels are the surface's own and are premultiplied on the way in, which is the format
 // everything else in this package speaks.
+@needs(posix)
 load_image(path: string) -> Option[&Surface]
     var cs = cstring(path)
     val h = c.surface_load_from_image_file(cs.ptr)
@@ -689,6 +692,7 @@ impl Drop for Font
 // which is the ordinary case rather than an exceptional one.
 //
 // `index` picks a face out of a TrueType collection and is 0 for an ordinary font file.
+@needs(posix)
 font(path: string, index: int = 0) -> Option[&Font]
     var cs = cstring(path)
     val h = c.font_face_load_from_file(cs.ptr, index)
@@ -733,6 +737,7 @@ struct FontCache
 
     // Load a font file and file it under a family name and style of the caller's choosing. `false` if
     // the file is not a font PlutoVG can read. `index` picks a face out of a TrueType collection.
+#if posix
     add_file(&self, family: string, path: string, bold: bool = false, italic: bool = false,
              index: int = 0) -> bool
         var name = cstring(family)
@@ -740,28 +745,35 @@ struct FontCache
 
         c.font_face_cache_add_file(self.handle, name.ptr, bold, italic, file.ptr, index)
     end add_file
+#endif
 
     // File every face in a font file -- each face of a collection -- under its own family name and
     // style, and answer how many there were. 0 if the file is not there or is not a font.
+#if posix
     load_file(&self, path: string) -> int
         var file = cstring(path)
 
         c.font_face_cache_load_file(self.handle, file.ptr)
     end load_file
+#endif
 
     // `load_file` for every `.ttf`, `.otf`, `.ttc` and `.otc` under a directory, recursively, and
     // answer how many faces there were.
+#if posix
     load_dir(&self, path: string) -> int
         var dir = cstring(path)
 
         c.font_face_cache_load_dir(self.handle, dir.ptr)
     end load_dir
+#endif
 
     // `load_dir` over the system's font directories, and answer how many faces there were: on macOS
     // `/Library/Fonts` and `/System/Library/Fonts`; on Linux `/usr/share/fonts` and
     // `/usr/local/share/fonts`; on Windows the Windows fonts directory. The user's own font
     // directory is not among them.
+#if posix
     load_system(&self) -> int = c.font_face_cache_load_sys(self.handle)
+#endif
 
     // The closest match for a family and style, or `None` if no face of that family is filed.
     get(&self, family: string, bold: bool = false, italic: bool = false) -> Option[&Font]

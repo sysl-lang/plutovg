@@ -265,6 +265,7 @@ static plutovg_glyph_t* plutovg_glyph_cache_get(plutovg_glyph_cache_t* cache, pl
     return glyph;
 }
 
+#ifndef PLUTOVG_FREESTANDING
 plutovg_font_face_t* plutovg_font_face_load_from_file(const char* filename, int ttcindex)
 {
     FILE* fp = fopen(filename, "rb");
@@ -296,6 +297,14 @@ plutovg_font_face_t* plutovg_font_face_load_from_file(const char* filename, int 
 
     return plutovg_font_face_load_from_data(data, length, ttcindex, free, data);
 }
+
+#else
+plutovg_font_face_t* plutovg_font_face_load_from_file(const char* filename, int ttcindex)
+{
+    (void)filename; (void)ttcindex;
+    return NULL;
+}
+#endif
 
 plutovg_font_face_t* plutovg_font_face_load_from_data(const void* data, unsigned int length, int ttcindex, plutovg_destroy_func_t destroy_func, void* closure)
 {

@@ -10,7 +10,7 @@
 // arrived against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.5" }
+//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.6" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
@@ -18,7 +18,7 @@
 
 package {
   name    = "plutovg"
-  version = "0.2.5"
+  version = "0.2.6"
   sysl   = "0.6.0"
 }
 
@@ -40,7 +40,6 @@ package {
 
 requires {
   heap  = true
-  posix = true
 }
 
 // **`heap` is honest and not yet avoidable.** PlutoVG mallocs its canvases, its path storage and its
@@ -49,16 +48,10 @@ requires {
 // heap, which is the large one and the reason a band-rendering program on a small machine is
 // practical at all, but the canvas itself still allocates.
 //
-// **`posix` is narrower than it looks: it is `write_png`, `font` and the font cache's file loaders,
-// and nothing else.** The whole
-// drawing surface of this package touches no file system. A program that renders into a buffer it
-// owns, loads its font from bytes linked into the binary with `font_from_data`, and never writes a
-// PNG, uses no operating system at all — it is declared here because the two functions that do are
-// part of the package, and a capability is a property of the module rather than of the call.
-//
-// Getting either of these down to nothing is a real piece of work — redirecting the allocator would
-// need changes upstream — and is worth a card rather than a note. Neither blocks the desktop use this
-// package has today.
+// Host file-loading APIs are capability-gated. Memory surfaces and fonts loaded
+// from bytes need no POSIX environment. Freestanding C builds disable file and
+// font-directory loading and image writing, while retaining rendering and text.
+// Firmware supplies a C runtime and its allocator; pixel buffers can be borrowed.
 
 // **What is NOT here is a `@link` directive**, and the absence is the point of vendoring: the
 // implementation is compiled from the sources carried in this package, so there is no external

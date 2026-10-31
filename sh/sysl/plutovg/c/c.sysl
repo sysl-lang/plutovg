@@ -88,6 +88,7 @@ extern "plutovg_surface_get_width" surface_get_width(surface: *Surface) -> int
 extern "plutovg_surface_get_height" surface_get_height(surface: *Surface) -> int
 extern "plutovg_surface_get_stride" surface_get_stride(surface: *Surface) -> int
 extern "plutovg_surface_clear" surface_clear(surface: *Surface, colour: *f32)
+@needs(posix)
 extern "plutovg_surface_write_to_png" surface_write_to_png(surface: *Surface, filename: *u8) -> bool
 
 // The stream writers hand each encoded chunk to a callback with the caller's `closure` pointer, so
@@ -100,6 +101,7 @@ extern "plutovg_surface_write_to_jpg_stream" surface_write_to_jpg_stream(surface
 // Decoding an image is stb_image's, vendored beside the library as `plutovg-stb-image.h`, so PNG,
 // JPEG, BMP, PSD, TGA, GIF, HDR, PIC and PNM all arrive through these two and nothing else has to be
 // linked. Both answer null on anything they cannot read, which includes a file that is not there.
+@needs(posix)
 extern "plutovg_surface_load_from_image_file" surface_load_from_image_file(filename: *u8) -> *Surface
 extern "plutovg_surface_load_from_image_data" surface_load_from_image_data(data: *u8, length: int) -> *Surface
 
@@ -187,6 +189,7 @@ extern "plutovg_canvas_clip_extents" canvas_clip_extents(canvas: *Canvas, extent
 // PlutoVG carries its own TrueType rasterizer (a vendored `stb_truetype`), so text needs no second
 // binding. `length` of -1 means the text is NUL-terminated.
 
+@needs(posix)
 extern "plutovg_font_face_load_from_file" font_face_load_from_file(filename: *u8, ttcindex: int) -> *FontFace
 extern "plutovg_font_face_load_from_data" font_face_load_from_data(data: *u8, length: uint, ttcindex: int, destroy: *u8, closure: *u8) -> *FontFace
 extern "plutovg_font_face_reference" font_face_reference(face: *FontFace) -> *FontFace
@@ -208,10 +211,14 @@ extern "plutovg_font_face_cache_destroy" font_face_cache_destroy(cache: *FontFac
 extern "plutovg_font_face_cache_reference_count" font_face_cache_reference_count(cache: *FontFaceCache) -> int
 extern "plutovg_font_face_cache_reset" font_face_cache_reset(cache: *FontFaceCache)
 extern "plutovg_font_face_cache_add" font_face_cache_add(cache: *FontFaceCache, family: *u8, bold: bool, italic: bool, face: *FontFace)
+@needs(posix)
 extern "plutovg_font_face_cache_add_file" font_face_cache_add_file(cache: *FontFaceCache, family: *u8, bold: bool, italic: bool, filename: *u8, ttcindex: int) -> bool
 extern "plutovg_font_face_cache_get" font_face_cache_get(cache: *FontFaceCache, family: *u8, bold: bool, italic: bool) -> *FontFace
+@needs(posix)
 extern "plutovg_font_face_cache_load_file" font_face_cache_load_file(cache: *FontFaceCache, filename: *u8) -> int
+@needs(posix)
 extern "plutovg_font_face_cache_load_dir" font_face_cache_load_dir(cache: *FontFaceCache, dirname: *u8) -> int
+@needs(posix)
 extern "plutovg_font_face_cache_load_sys" font_face_cache_load_sys(cache: *FontFaceCache) -> int
 
 // A canvas holds a cache of its own (made on first use by `add_font_face`/`add_font_file`) or the one
