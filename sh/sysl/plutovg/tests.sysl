@@ -14,6 +14,7 @@ module sh.sysl.plutovg
 import sh.sysl.plutovg.c
 import sysl.fs.{remove_file, make_temp_dir, make_dir, symlink, write_text, remove_dir_all}
 import sysl.testing.skip
+import sysl.buf.{Buf, buf}
 
 // The four components of the pixel at (x, y).
 private blue_at(s: &Surface, x: int, y: int) -> u8 = s.data()[usize(y * s.stride() + x * 4)]
