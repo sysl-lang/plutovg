@@ -10,7 +10,7 @@
 // arrived against `sysl.sum`, and compiles it as more modules.
 //
 //     dependencies {
-//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.6" }
+//       plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.7" }
 //     }
 //
 // The coordinate is identity rather than a URL, so it carries no `https://`, and the version is the
@@ -18,7 +18,7 @@
 
 package {
   name    = "plutovg"
-  version = "0.2.6"
+  version = "0.2.7"
   sysl   = "0.6.0"
 }
 

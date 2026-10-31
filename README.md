@@ -7,7 +7,7 @@ filling, stroking, dashing, gradients, clipping, transforms and text, rasterized
 
 ```
 dependencies {
-  plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.6" }
+  plutovg { git = "github.com/sysl-lang/plutovg", version = "0.2.7" }
 }
 ```
 
