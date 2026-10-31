@@ -448,6 +448,91 @@ a_dash_leaves_gaps()
     assert(blank > 0)
 end a_dash_leaves_gaps
 
+// How many pixels along the middle of a 40-wide stroke were painted.
+private painted_count(s: &Surface) -> int
+    var n = 0
+
+    for x in 0..<40
+        if alpha_at(s, x, 4) > 128 then n += 1
+
+    n
+end painted_count
+
+private dashed_with(pattern: []const f32) -> int
+    val s = surface(40, 8).unwrap()
+    val cv = canvas(s).unwrap()
+
+    cv.rgb(1.0, 1.0, 1.0)
+    cv.line_width(4.0)
+    cv.dash(pattern)
+    cv.move_to(0.0, 4.0)
+    cv.line_to(40.0, 4.0)
+    cv.stroke()
+    painted_count(s)
+end dashed_with
+
+@test("dash takes a val array, a var array, a Buf slice and an empty slice")
+dash_takes_every_kind_of_slice()
+    val fixed: [2]f32 = [4.0, 4.0]
+    var mutable: [2]f32 = [4.0, 4.0]
+    var b: Buf[f32] = buf()
+    b.push(4.0)
+    b.push(4.0)
+    val empty: [0]f32 = []
+
+    val a = dashed_with(fixed[..])
+
+    assert(a > 0 && a < 40)
+    assert_eq(dashed_with(mutable[..]), a)
+    assert_eq(dashed_with(b.elems[0..<b.len()]), a)
+    assert_eq(dashed_with(empty[..]), 40, "an empty pattern draws solid")
+end dash_takes_every_kind_of_slice
+
+private gradient_red_at_left(stops: []const Stop) -> int
+    val s = surface(64, 8).unwrap()
+    val cv = canvas(s).unwrap()
+
+    assert(cv.linear_gradient(0.0, 0.0, 64.0, 0.0, stops))
+    cv.rect(0.0, 0.0, 64.0, 8.0)
+    cv.fill()
+    red_at(s, 1, 4)
+end gradient_red_at_left
+
+private radial_alpha_at_centre(stops: []const Stop) -> int
+    val s = surface(16, 16).unwrap()
+    val cv = canvas(s).unwrap()
+
+    assert(cv.radial_gradient(8.0, 8.0, 8.0, 8.0, 8.0, 0.0, stops))
+    cv.rect(0.0, 0.0, 16.0, 16.0)
+    cv.fill()
+    alpha_at(s, 8, 8)
+end radial_alpha_at_centre
+
+@test("the gradients take a val array, a var array, a Buf slice and an empty slice")
+gradients_take_every_kind_of_slice()
+    val fixed: [2]Stop = [Stop(0.0, 1.0, 0.0, 0.0, 1.0), Stop(1.0, 0.0, 0.0, 1.0, 1.0)]
+    var mutable: [2]Stop = [Stop(0.0, 1.0, 0.0, 0.0, 1.0), Stop(1.0, 0.0, 0.0, 1.0, 1.0)]
+    var b: Buf[Stop] = buf()
+    b.push(Stop(0.0, 1.0, 0.0, 0.0, 1.0))
+    b.push(Stop(1.0, 0.0, 0.0, 1.0, 1.0))
+    val empty: [0]Stop = []
+
+    assert(gradient_red_at_left(fixed[..]) > 200)
+    assert(gradient_red_at_left(mutable[..]) > 200)
+    assert(gradient_red_at_left(b.elems[0..<b.len()]) > 200)
+
+    assert(radial_alpha_at_centre(fixed[..]) > 200)
+    assert(radial_alpha_at_centre(mutable[..]) > 200)
+    assert(radial_alpha_at_centre(b.elems[0..<b.len()]) > 200)
+
+    // No stops is accepted and sets a gradient with nothing in it.
+    val s = surface(8, 8).unwrap()
+    val cv = canvas(s).unwrap()
+
+    assert(cv.linear_gradient(0.0, 0.0, 8.0, 0.0, empty[..]))
+    assert(cv.radial_gradient(4.0, 4.0, 4.0, 4.0, 4.0, 0.0, empty[..]))
+end gradients_take_every_kind_of_slice
+
 // -- the enumerations ------------------------------------------------------------------------------
 
 @test("every code is the C compiler's own number, and no two are the same")

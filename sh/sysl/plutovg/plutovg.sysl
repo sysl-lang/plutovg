@@ -346,7 +346,7 @@ struct Stop
 end Stop
 
 // Five floats each, laid out as the C `plutovg_gradient_stop_t` array the library expects.
-private flatten(stops: []Stop, into: *f32) -> int
+private flatten(stops: []const Stop, into: *f32) -> int
     for i in 0..<stops.len
         into[i * 5] = stops[i].offset
         into[i * 5 + 1] = stops[i].r
@@ -398,7 +398,7 @@ struct Canvas
     // Paint with a gradient along the line from one point to another.
     //
     // Answers false if there are more than `MAX_STOPS` stops, in which case nothing is set.
-    linear_gradient(&self, x1: f32, y1: f32, x2: f32, y2: f32, stops: []Stop,
+    linear_gradient(&self, x1: f32, y1: f32, x2: f32, y2: f32, stops: []const Stop,
                     spread: Spread = Spread.Pad) -> bool
         if stops.len > MAX_STOPS then return false
 
@@ -411,7 +411,7 @@ struct Canvas
 
     // Paint with a gradient spreading out from a focal point inside a circle.
     radial_gradient(&self, cx: f32, cy: f32, cr: f32, fx: f32, fy: f32, fr: f32,
-                    stops: []Stop, spread: Spread = Spread.Pad) -> bool
+                    stops: []const Stop, spread: Spread = Spread.Pad) -> bool
         if stops.len > MAX_STOPS then return false
 
         var flat: [160]f32
@@ -452,7 +452,7 @@ struct Canvas
 
     // A dash pattern: on for the first length, off for the second, and so on, repeating. An empty array
     // draws solid.
-    dash(&self, pattern: []f32, offset: f32 = 0.0)
+    dash(&self, pattern: []const f32, offset: f32 = 0.0)
         c.canvas_set_dash_offset(self.handle, offset)
         c.canvas_set_dash_array(self.handle, as_ptr(pattern), int(pattern.len))
 
